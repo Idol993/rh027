@@ -1,0 +1,78 @@
+.dashboard-page {
+  padding: 0;
+}
+
+.page-header {
+  margin-bottom: 20px;
+}
+
+.stats-cards {
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.stat-card .ant-statistic-title {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.stat-card .ant-statistic-content {
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.stat-blue .ant-statistic-content {
+  color: #1890ff;
+}
+
+.stat-green .ant-statistic-content {
+  color: #52c41a;
+}
+
+.stat-orange .ant-statistic-content {
+  color: #fa8c16;
+}
+
+.stat-purple .ant-statistic-content {
+  color: #722ed1;
+}
+
+.stat-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chart-card {
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.list-card {
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.list-card .ant-list-item {
+  padding: 12px 0;
+}
+
+.list-card .ant-list-item:first-child {
+  padding-top: 0;
+}
+
+.list-card .ant-list-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
