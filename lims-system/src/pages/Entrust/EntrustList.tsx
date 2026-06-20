@@ -13,6 +13,11 @@ import {
   InputNumber,
   message,
   Popconfirm,
+  Row,
+  Col,
+  Descriptions,
+  Divider,
+  Typography,
 } from 'antd';
 import {
   PlusOutlined,
@@ -21,14 +26,17 @@ import {
   EditOutlined,
   DeleteOutlined,
   FileSearchOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { EntrustOrder, EntrustStatus } from '../../types';
+import { EntrustOrder, EntrustStatus, TestItem } from '../../types';
+import { mockTestItems } from '../../mock/data';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
+const { Title } = Typography;
 
 const statusMap: Record<EntrustStatus, { color: string; text: string }> = {
   draft: { color: 'default', text: '草稿' },
@@ -41,6 +49,12 @@ const statusMap: Record<EntrustStatus, { color: string; text: string }> = {
 const EntrustList = () => {
   const orders = useStore((state) => state.orders);
   const addOrder = useStore((state) => state.addOrder);
+  const updateOrder = useStore((state) => state.updateOrder);
+  const deleteOrder = useStore((state) => state.deleteOrder);
+  const updateOrderStatus = useStore((state) => state.updateOrderStatus);
+  const clients = useStore((state) => state.clients);
+  const currentUser = useStore((state) => state.currentUser);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<EntrustOrder | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
@@ -110,7 +124,7 @@ const EntrustList = () => {
     {
       title: '操作',
       key: 'action',
-      width: 200,
+      width: 240,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -135,11 +149,22 @@ const EntrustList = () => {
               <Button
                 type="link"
                 size="small"
-                danger
-                icon={<DeleteOutlined />}
+                icon={<SendOutlined />}
+                onClick={() => handleSubmitReview(record.id)}
               >
-                删除
+                送审
               </Button>
+              <Popconfirm
+                title="确定要删除该委托单吗？"
+                description="删除后不可恢复"
+                onConfirm={() => handleDelete(record.id)}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
             </>
           )}
           {record.status === 'submitted' && (
@@ -147,8 +172,9 @@ const EntrustList = () => {
               type="link"
               size="small"
               icon={<FileSearchOutlined />}
+              onClick={() => handleSendToReview(record.id)}
             >
-              送审
+              提交评审
             </Button>
           )}
         </Space>
@@ -166,6 +192,7 @@ const EntrustList = () => {
     form.setFieldsValue({
       ...record,
       deadline: dayjs(record.deadline),
+      testItemIds: record.testItems?.map((t) => t.id) || [],
     });
     setIsModalOpen(true);
   };
@@ -176,20 +203,51 @@ const EntrustList = () => {
     setIsModalOpen(true);
   };
 
+  const handleDelete = (id: string) => {
+    deleteOrder(id);
+    message.success('委托单删除成功');
+  };
+
+  const handleSubmitReview = (id: string) => {
+    updateOrderStatus(id, 'submitted');
+    message.success('委托单已提交，等待评审');
+  };
+
+  const handleSendToReview = (id: string) => {
+    updateOrderStatus(id, 'reviewing');
+    message.success('已进入评审流程');
+  };
+
   const handleSubmit = (values: any) => {
+    const selectedItems = mockTestItems.filter((item) =>
+      values.testItemIds?.includes(item.id)
+    );
+    const standards = [...new Set(selectedItems.map((item) => item.standard))];
+
+    const client = clients.find((c) => c.id === values.clientId);
+
     const orderData = {
-      ...values,
+      clientId: values.clientId,
+      clientName: client?.name || '',
+      sampleName: values.sampleName,
+      sampleType: values.sampleType,
+      specModel: values.specModel,
+      quantity: values.quantity,
+      testItems: selectedItems,
+      standards: standards,
       deadline: values.deadline.format('YYYY-MM-DD'),
+      reportMethod: values.reportMethod,
       status: 'draft' as EntrustStatus,
-      createdBy: '系统管理员',
-      testItems: [],
-      standards: [],
-      clientId: 'C001',
-      sampleType: '水质',
-      quantity: values.quantity || 1,
+      createdBy: currentUser?.name || '系统管理员',
     };
-    addOrder(orderData);
-    message.success('委托单创建成功');
+
+    if (selectedRecord) {
+      updateOrder(selectedRecord.id, orderData);
+      message.success('委托单更新成功');
+    } else {
+      addOrder(orderData);
+      message.success('委托单创建成功');
+    }
     setIsModalOpen(false);
   };
 
@@ -230,7 +288,7 @@ const EntrustList = () => {
           columns={columns}
           dataSource={orders}
           rowKey="id"
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1300 }}
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Card>
@@ -240,20 +298,23 @@ const EntrustList = () => {
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         footer={null}
-        width={700}
+        width={720}
+        maskClosable={false}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                name="clientName"
+                name="clientId"
                 label="客户名称"
                 rules={[{ required: true, message: '请选择客户' }]}
               >
                 <Select placeholder="请选择客户">
-                  <Option value="清水环保科技有限公司">清水环保科技有限公司</Option>
-                  <Option value="绿城食品股份有限公司">绿城食品股份有限公司</Option>
-                  <Option value="恒泰制药有限公司">恒泰制药有限公司</Option>
+                  {clients.map((c) => (
+                    <Option key={c.id} value={c.id}>
+                      {c.name}
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
             </Col>
@@ -326,15 +387,22 @@ const EntrustList = () => {
             </Col>
           </Row>
           <Form.Item
-            name="standards"
-            label="依据标准"
+            name="testItemIds"
+            label="检测项目"
+            rules={[{ required: true, message: '请至少选择一个检测项目' }]}
           >
-            <Select mode="tags" placeholder="请输入或选择标准" style={{ width: '100%' }} />
+            <Select mode="multiple" placeholder="请选择检测项目" style={{ width: '100%' }}>
+              {mockTestItems.map((item) => (
+                <Option key={item.id} value={item.id}>
+                  {item.name}（{item.code}）- {item.standard}
+                </Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item>
             <Space>
               <Button type="primary" htmlType="submit">
-                保存
+                {selectedRecord ? '保存修改' : '创建委托单'}
               </Button>
               <Button onClick={() => setIsModalOpen(false)}>取消</Button>
             </Space>
@@ -351,7 +419,7 @@ const EntrustList = () => {
             关闭
           </Button>,
         ]}
-        width={700}
+        width={760}
       >
         {selectedRecord && (
           <div>
@@ -370,29 +438,52 @@ const EntrustList = () => {
               <Descriptions.Item label="截止日期">{selectedRecord.deadline}</Descriptions.Item>
               <Descriptions.Item label="报告方式">{selectedRecord.reportMethod}</Descriptions.Item>
               <Descriptions.Item label="创建时间">{selectedRecord.createdAt}</Descriptions.Item>
+              <Descriptions.Item label="创建人">{selectedRecord.createdBy}</Descriptions.Item>
+              <Descriptions.Item label="评审人">{selectedRecord.reviewedBy || '-'}</Descriptions.Item>
             </Descriptions>
+
             <Divider />
+
+            <Title level={5}>依据标准</Title>
+            <div style={{ marginBottom: 16 }}>
+              {selectedRecord.standards && selectedRecord.standards.length > 0 ? (
+                selectedRecord.standards.map((s, idx) => (
+                  <Tag key={idx} color="blue" style={{ marginBottom: 4 }}>
+                    {s}
+                  </Tag>
+                ))
+              ) : (
+                <span style={{ color: '#999' }}>暂无标准</span>
+              )}
+            </div>
+
             <Title level={5}>检测项目</Title>
             <Table
-              dataSource={selectedRecord.testItems}
+              dataSource={selectedRecord.testItems || []}
               rowKey="id"
               size="small"
               pagination={false}
               columns={[
                 { title: '项目名称', dataIndex: 'name', key: 'name' },
-                { title: '项目编码', dataIndex: 'code', key: 'code' },
+                { title: '项目编码', dataIndex: 'code', key: 'code', width: 100 },
                 { title: '检测标准', dataIndex: 'standard', key: 'standard' },
-                { title: '限值要求', dataIndex: 'limit', key: 'limit' },
+                { title: '限值要求', dataIndex: 'limit', key: 'limit', width: 120 },
+                { title: '检测方法', dataIndex: 'method', key: 'method' },
               ]}
             />
+
+            {selectedRecord.reviewOpinion && (
+              <>
+                <Divider />
+                <Title level={5}>评审意见</Title>
+                <p style={{ color: '#666' }}>{selectedRecord.reviewOpinion}</p>
+              </>
+            )}
           </div>
         )}
       </Modal>
     </div>
   );
 };
-
-import { Row, Col, Descriptions, Divider, Typography } from 'antd';
-const { Title } = Typography;
 
 export default EntrustList;

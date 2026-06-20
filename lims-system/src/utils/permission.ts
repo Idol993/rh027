@@ -65,18 +65,6 @@ export const menuConfig: Array<{
         path: '/sample/list',
         roles: ['tester', 'reviewer', 'quality_manager', 'director'],
       },
-      {
-        key: 'sample-register',
-        label: '样品登记',
-        path: '/sample/register',
-        roles: ['tester', 'reviewer'],
-      },
-      {
-        key: 'sample-storage',
-        label: '留样管理',
-        path: '/sample/storage',
-        roles: ['tester', 'reviewer', 'quality_manager'],
-      },
     ],
   },
   {
@@ -98,39 +86,6 @@ export const menuConfig: Array<{
         path: '/task/list',
         roles: ['reviewer', 'quality_manager', 'director'],
       },
-      {
-        key: 'task-assign',
-        label: '任务分配',
-        path: '/task/assign',
-        roles: ['reviewer', 'quality_manager'],
-      },
-    ],
-  },
-  {
-    key: 'data',
-    label: '数据采集',
-    icon: 'BarChartOutlined',
-    path: '/data',
-    roles: ['tester', 'reviewer', 'quality_manager'],
-    children: [
-      {
-        key: 'data-collect',
-        label: '数据录入',
-        path: '/data/collect',
-        roles: ['tester'],
-      },
-      {
-        key: 'data-review',
-        label: '数据审核',
-        path: '/data/review',
-        roles: ['reviewer', 'quality_manager'],
-      },
-      {
-        key: 'data-abnormal',
-        label: '异常处理',
-        path: '/data/abnormal',
-        roles: ['quality_manager', 'reviewer'],
-      },
     ],
   },
   {
@@ -145,18 +100,6 @@ export const menuConfig: Array<{
         label: '报告列表',
         path: '/report/list',
         roles: ['tester', 'reviewer', 'quality_manager', 'director'],
-      },
-      {
-        key: 'report-create',
-        label: '报告编制',
-        path: '/report/create',
-        roles: ['tester', 'reviewer'],
-      },
-      {
-        key: 'report-review',
-        label: '报告审核',
-        path: '/report/review',
-        roles: ['reviewer', 'quality_manager', 'director'],
       },
     ],
   },
@@ -179,12 +122,6 @@ export const menuConfig: Array<{
         path: '/reagent/usage',
         roles: ['tester', 'reviewer', 'quality_manager'],
       },
-      {
-        key: 'reagent-warning',
-        label: '预警管理',
-        path: '/reagent/warning',
-        roles: ['quality_manager', 'reviewer'],
-      },
     ],
   },
   {
@@ -200,39 +137,6 @@ export const menuConfig: Array<{
         path: '/equipment/list',
         roles: ['tester', 'reviewer', 'quality_manager', 'director'],
       },
-      {
-        key: 'equipment-calibration',
-        label: '校准检定',
-        path: '/equipment/calibration',
-        roles: ['quality_manager', 'reviewer'],
-      },
-      {
-        key: 'equipment-maintenance',
-        label: '维护保养',
-        path: '/equipment/maintenance',
-        roles: ['tester', 'reviewer', 'quality_manager'],
-      },
-    ],
-  },
-  {
-    key: 'quality',
-    label: '质量控制',
-    icon: 'SafetyCertificateOutlined',
-    path: '/quality',
-    roles: ['quality_manager', 'director'],
-    children: [
-      {
-        key: 'quality-qc',
-        label: '质控管理',
-        path: '/quality/qc',
-        roles: ['quality_manager', 'director'],
-      },
-      {
-        key: 'quality-supervision',
-        label: '质量监督',
-        path: '/quality/supervision',
-        roles: ['quality_manager', 'director'],
-      },
     ],
   },
   {
@@ -241,27 +145,6 @@ export const menuConfig: Array<{
     icon: 'MonitorOutlined',
     path: '/monitor',
     roles: ['director', 'quality_manager'],
-  },
-  {
-    key: 'system',
-    label: '系统管理',
-    icon: 'SettingOutlined',
-    path: '/system',
-    roles: ['director'],
-    children: [
-      {
-        key: 'system-user',
-        label: '用户管理',
-        path: '/system/user',
-        roles: ['director'],
-      },
-      {
-        key: 'system-log',
-        label: '操作日志',
-        path: '/system/log',
-        roles: ['director'],
-      },
-    ],
   },
 ];
 

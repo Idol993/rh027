@@ -56,6 +56,7 @@ const App = () => {
             <Route path="reagent">
               <Route index element={<Navigate to="list" replace />} />
               <Route path="list" element={<ReagentList />} />
+              <Route path="usage" element={<ReagentList />} />
             </Route>
             <Route path="equipment">
               <Route index element={<Navigate to="list" replace />} />

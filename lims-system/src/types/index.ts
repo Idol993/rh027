@@ -21,7 +21,33 @@ export type ReportStatus = 'draft' | 'reviewing' | 'level1_signed' | 'level2_sig
 
 export type ReagentStatus = 'in_stock' | 'low_stock' | 'expiring' | 'expired' | 'used_up';
 
-export type EquipmentStatus = 'normal' | 'in_use' | 'maintenance' | 'calibrating' | 'overdue' | 'fault';
+export type EquipmentStatus = 'normal' | 'in_use' | 'maintenance' | 'calibrating' | 'calibration_due' | 'overdue' | 'fault' | 'faulty' | 'scrapped';
+
+export interface CalibrationRecord {
+  id: string;
+  equipmentId: string;
+  calibrationDate: string;
+  nextCalibrationDate: string;
+  calibrationAgency: string;
+  certificateNo: string;
+  result: 'pass' | 'fail';
+  description?: string;
+  operator: string;
+}
+
+export interface MaintenanceRecord {
+  id: string;
+  equipmentId: string;
+  type: 'repair' | 'maintenance';
+  startDate: string;
+  endDate: string;
+  faultDescription: string;
+  repairContent: string;
+  repairAgency: string;
+  cost: number;
+  result: 'fixed' | 'processing' | 'scrapped';
+  operator: string;
+}
 
 export interface Client {
   id: string;
@@ -204,16 +230,24 @@ export interface Equipment {
   name: string;
   model: string;
   equipmentNo: string;
+  code: string;
+  spec: string;
   manufacturer: string;
+  serialNo: string;
+  purchaseDate: string;
   department: string;
   status: EquipmentStatus;
   lastCalibrationDate: string;
   nextCalibrationDate: string;
   calibrationCycle: number;
+  calibrationCertificateNo: string;
   lastMaintenanceDate?: string;
   usageHours: number;
   location: string;
   manager: string;
+  managerPhone: string;
+  calibrationRecords?: CalibrationRecord[];
+  maintenanceRecords?: MaintenanceRecord[];
 }
 
 export interface QCResult {

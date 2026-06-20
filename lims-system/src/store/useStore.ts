@@ -7,6 +7,7 @@ import {
   TestTask,
   Report,
   Reagent,
+  ReagentUsage,
   Equipment,
   DashboardStats,
   QCResult,
@@ -40,11 +41,19 @@ interface AppState {
   login: (username: string, password: string) => boolean;
   logout: () => void;
   addOrder: (order: Omit<EntrustOrder, 'id' | 'orderNo' | 'createdAt'>) => void;
+  updateOrder: (id: string, order: Partial<EntrustOrder>) => void;
+  deleteOrder: (id: string) => void;
   updateOrderStatus: (id: string, status: EntrustOrder['status'], opinion?: string) => void;
   addSample: (sample: Omit<Sample, 'id'>) => void;
   updateSampleStatus: (id: string, status: Sample['status']) => void;
+  updateTask: (id: string, task: Partial<TestTask>) => void;
   updateTaskStatus: (id: string, status: TestTask['status']) => void;
+  addReport: (report: Omit<Report, 'id' | 'reportNo'>) => void;
   updateReportStatus: (id: string, status: Report['status'], signData?: any) => void;
+  updateReport: (id: string, report: Partial<Report>) => void;
+  updateReagent: (id: string, reagent: Partial<Reagent>) => void;
+  addReagentUsage: (id: string, usage: Omit<ReagentUsage, 'id'>) => void;
+  updateEquipment: (id: string, equipment: Partial<Equipment>) => void;
 }
 
 export const useStore = create<AppState>()(
@@ -87,6 +96,18 @@ export const useStore = create<AppState>()(
         set((state) => ({ orders: [...state.orders, newOrder] }));
       },
 
+      updateOrder: (id, order) => {
+        set((state) => ({
+          orders: state.orders.map((o) => (o.id === id ? { ...o, ...order } : o)),
+        }));
+      },
+
+      deleteOrder: (id) => {
+        set((state) => ({
+          orders: state.orders.filter((o) => o.id !== id),
+        }));
+      },
+
       updateOrderStatus: (id, status, opinion) => {
         set((state) => ({
           orders: state.orders.map((o) =>
@@ -119,11 +140,32 @@ export const useStore = create<AppState>()(
         }));
       },
 
+      updateTask: (id, task) => {
+        set((state) => ({
+          tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...task } : t)),
+        }));
+      },
+
       updateTaskStatus: (id, status) => {
         set((state) => ({
           tasks: state.tasks.map((t) =>
             t.id === id ? { ...t, status } : t
           ),
+        }));
+      },
+
+      addReport: (report) => {
+        const newReport: Report = {
+          ...report,
+          id: `R${Date.now()}`,
+          reportNo: `BG${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(get().reports.length + 1).padStart(3, '0')}`,
+        };
+        set((state) => ({ reports: [...state.reports, newReport] }));
+      },
+
+      updateReport: (id, report) => {
+        set((state) => ({
+          reports: state.reports.map((r) => (r.id === id ? { ...r, ...report } : r)),
         }));
       },
 
@@ -159,6 +201,41 @@ export const useStore = create<AppState>()(
             }
             return updated;
           }),
+        }));
+      },
+
+      updateReagent: (id, reagent) => {
+        set((state) => ({
+          reagents: state.reagents.map((r) => (r.id === id ? { ...r, ...reagent } : r)),
+        }));
+      },
+
+      addReagentUsage: (id, usage) => {
+        set((state) => ({
+          reagents: state.reagents.map((r) => {
+            if (r.id !== id) return r;
+            const newUsage = {
+              ...usage,
+              id: `U${Date.now()}`,
+              usedAt: new Date().toLocaleString('zh-CN'),
+            };
+            const newQuantity = r.quantity - usage.quantity;
+            let status = r.status;
+            if (newQuantity <= 0) status = 'used_up';
+            else if (newQuantity < r.safetyStock) status = 'low_stock';
+            return {
+              ...r,
+              quantity: newQuantity,
+              status,
+              usageRecords: [newUsage, ...r.usageRecords],
+            };
+          }),
+        }));
+      },
+
+      updateEquipment: (id, equipment) => {
+        set((state) => ({
+          equipments: state.equipments.map((e) => (e.id === id ? { ...e, ...equipment } : e)),
         }));
       },
     }),

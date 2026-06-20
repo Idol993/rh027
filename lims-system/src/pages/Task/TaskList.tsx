@@ -8,30 +8,33 @@ import {
   Input,
   Select,
   Modal,
+  Form,
+  InputNumber,
   message,
   Descriptions,
   Row,
   Col,
   Statistic,
-  Progress,
+  Divider,
+  Typography,
 } from 'antd';
 import {
   SearchOutlined,
   EyeOutlined,
   CheckOutlined,
-  CloseOutlined,
   PlayCircleOutlined,
   ClockCircleOutlined,
   WarningOutlined,
   ExclamationCircleOutlined,
-  ToolOutlined,
-  UserOutlined,
+  RetweetOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { TestTask, TaskStatus } from '../../types';
+import { TestTask, TaskStatus, TestResult } from '../../types';
 
 const { Option } = Select;
+const { TextArea } = Input;
+const { Title } = Typography;
 
 const statusMap: Record<TaskStatus, { color: string; text: string }> = {
   pending: { color: 'default', text: '待检测' },
@@ -44,13 +47,173 @@ const statusMap: Record<TaskStatus, { color: string; text: string }> = {
 
 const TaskList = () => {
   const tasks = useStore((state) => state.tasks);
+  const updateTask = useStore((state) => state.updateTask);
   const currentUser = useStore((state) => state.currentUser);
+  const reagents = useStore((state) => state.reagents);
+  const equipments = useStore((state) => state.equipments);
+  const addReagentUsage = useStore((state) => state.addReagentUsage);
+
   const [selectedRecord, setSelectedRecord] = useState<TestTask | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [resultModalOpen, setResultModalOpen] = useState(false);
+  const [abnormalModalOpen, setAbnormalModalOpen] = useState(false);
+  const [form] = Form.useForm();
+  const [abnormalForm] = Form.useForm();
 
   const filteredTasks = currentUser?.role === 'tester'
     ? tasks.filter((t) => t.testerId === currentUser.id)
     : tasks;
+
+  const handleView = (record: TestTask) => {
+    setSelectedRecord(record);
+    setViewModalOpen(true);
+  };
+
+  const handleStartTest = (record: TestTask) => {
+    const equipment = equipments.find((e) => e.id === record.equipmentId);
+    if (equipment && (equipment.status === 'fault' || equipment.status === 'overdue' || equipment.status === 'maintenance')) {
+      message.error(`设备状态异常（${statusMap[equipment.status as TaskStatus]?.text || equipment.status}），无法开始检测`);
+      return;
+    }
+
+    updateTask(record.id, {
+      status: 'in_progress',
+      startTime: new Date().toLocaleString('zh-CN'),
+    });
+    message.success('检测已开始');
+  };
+
+  const handleSubmitResult = (record: TestTask) => {
+    setSelectedRecord(record);
+    form.resetFields();
+    setResultModalOpen(true);
+  };
+
+  const handleResultSubmit = (values: any) => {
+    if (!selectedRecord) return;
+
+    const rawData = values.rawData
+      .split(/[,，\s]+/)
+      .filter((s: string) => s.trim() !== '')
+      .map((s: string) => parseFloat(s.trim()))
+      .filter((n: number) => !isNaN(n));
+
+    const average = rawData.length > 0
+      ? rawData.reduce((a: number, b: number) => a + b, 0) / rawData.length
+      : 0;
+
+    const rsd = rawData.length > 1
+      ? (Math.sqrt(rawData.reduce((a: number, b: number) => a + (b - average) ** 2, 0) / (rawData.length - 1)) / average) * 100
+      : 0;
+
+    const resultValue = values.result ?? average;
+
+    const limit = selectedRecord.testItem.limit;
+    let isQualified = true;
+    if (limit.includes('≤') || limit.includes('<=')) {
+      const limitVal = parseFloat(limit.replace(/[≤<=]/g, '').trim());
+      isQualified = resultValue <= limitVal;
+    } else if (limit.includes('≥') || limit.includes('>=')) {
+      const limitVal = parseFloat(limit.replace(/[≥>=]/g, '').trim());
+      isQualified = resultValue >= limitVal;
+    } else if (limit.includes('~') || limit.includes('-')) {
+      const parts = limit.split(/[~-]/);
+      const min = parseFloat(parts[0]);
+      const max = parseFloat(parts[1]);
+      isQualified = resultValue >= min && resultValue <= max;
+    }
+
+    const result: TestResult = {
+      id: `RES${Date.now()}`,
+      taskId: selectedRecord.id,
+      value: resultValue,
+      unit: selectedRecord.testItem.unit,
+      result: isQualified ? 'qualified' : 'unqualified',
+      rawData: rawData,
+      average: average,
+      deviation: values.deviation,
+      rsd: parseFloat(rsd.toFixed(2)),
+      environment: {
+        temperature: values.temperature || 25,
+        humidity: values.humidity || 50,
+      },
+      testTime: new Date().toLocaleString('zh-CN'),
+      instrumentNo: selectedRecord.equipmentName,
+      reagentBatch: values.reagentBatch || '',
+      standardSubstance: values.standardSubstance || '',
+      operator: currentUser?.name || '',
+    };
+
+    if (values.reagentId && values.reagentUsage) {
+      addReagentUsage(values.reagentId, {
+        reagentId: values.reagentId,
+        quantity: values.reagentUsage,
+        user: currentUser?.name || '',
+        purpose: `${selectedRecord.testItem.name}检测`,
+        sampleId: selectedRecord.sampleId,
+        usedAt: new Date().toLocaleString('zh-CN'),
+      });
+    }
+
+    if (!isQualified) {
+      updateTask(selectedRecord.id, {
+        status: 'abnormal',
+        result,
+        abnormal: true,
+        abnormalReason: '检测结果不合格',
+        endTime: new Date().toLocaleString('zh-CN'),
+      });
+      message.warning('检测结果不合格，任务已标记为异常');
+    } else {
+      updateTask(selectedRecord.id, {
+        status: 'completed',
+        result,
+        abnormal: false,
+        endTime: new Date().toLocaleString('zh-CN'),
+      });
+      message.success('检测结果提交成功');
+    }
+
+    setResultModalOpen(false);
+  };
+
+  const handleAbnormal = (record: TestTask) => {
+    setSelectedRecord(record);
+    abnormalForm.resetFields();
+    setAbnormalModalOpen(true);
+  };
+
+  const handleAbnormalSubmit = (values: any) => {
+    if (!selectedRecord) return;
+
+    if (values.action === 'recheck') {
+      updateTask(selectedRecord.id, {
+        status: 'pending',
+        abnormal: false,
+        abnormalReason: values.reason,
+        recheck: true,
+        recheckCount: (selectedRecord.recheckCount || 0) + 1,
+        startTime: undefined,
+        endTime: undefined,
+        result: undefined,
+      });
+      message.success('已安排复检，任务重新分配');
+    } else if (values.action === 'approve') {
+      updateTask(selectedRecord.id, {
+        status: 'completed',
+        abnormalReason: values.reason,
+      });
+      message.success('异常已确认，任务完成');
+    } else if (values.action === 'reject') {
+      updateTask(selectedRecord.id, {
+        status: 'rejected',
+        abnormalReason: values.reason,
+      });
+      message.success('任务已驳回');
+    }
+
+    setAbnormalModalOpen(false);
+  };
 
   const columns: ColumnsType<TestTask> = [
     {
@@ -106,22 +269,24 @@ const TaskList = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 120,
       render: (status: TaskStatus, record) => (
-        <Space>
+        <Space direction="vertical" size={4}>
           <Tag color={statusMap[status].color}>{statusMap[status].text}</Tag>
-          {record.recheck && <Tag color="orange">复检</Tag>}
-          {record.abnormal && <Tag color="red">异常</Tag>}
+          <Space size={4}>
+            {record.recheck && <Tag color="orange" style={{ margin: 0 }}>复检</Tag>}
+            {record.abnormal && <Tag color="red" style={{ margin: 0 }}>异常</Tag>}
+          </Space>
         </Space>
       ),
     },
     {
       title: '操作',
       key: 'action',
-      width: 200,
+      width: 220,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size="small" direction="vertical">
           <Button
             type="link"
             size="small"
@@ -135,6 +300,7 @@ const TaskList = () => {
               type="link"
               size="small"
               icon={<PlayCircleOutlined />}
+              onClick={() => handleStartTest(record)}
             >
               开始检测
             </Button>
@@ -144,6 +310,7 @@ const TaskList = () => {
               type="link"
               size="small"
               icon={<CheckOutlined />}
+              onClick={() => handleSubmitResult(record)}
             >
               提交结果
             </Button>
@@ -154,6 +321,7 @@ const TaskList = () => {
               size="small"
               danger
               icon={<WarningOutlined />}
+              onClick={() => handleAbnormal(record)}
             >
               异常处理
             </Button>
@@ -163,11 +331,6 @@ const TaskList = () => {
     },
   ];
 
-  const handleView = (record: TestTask) => {
-    setSelectedRecord(record);
-    setViewModalOpen(true);
-  };
-
   const stats = {
     total: filteredTasks.length,
     pending: filteredTasks.filter((t) => t.status === 'pending').length,
@@ -175,6 +338,8 @@ const TaskList = () => {
     completed: filteredTasks.filter((t) => t.status === 'completed').length,
     abnormal: filteredTasks.filter((t) => t.abnormal).length,
   };
+
+  const availableReagents = reagents.filter((r) => r.status !== 'expired' && r.status !== 'used_up' && r.quantity > 0);
 
   return (
     <div>
@@ -275,7 +440,7 @@ const TaskList = () => {
             关闭
           </Button>,
         ]}
-        width={700}
+        width={720}
       >
         {selectedRecord && (
           <div>
@@ -301,6 +466,46 @@ const TaskList = () => {
               <Descriptions.Item label="开始时间">{selectedRecord.startTime || '-'}</Descriptions.Item>
               <Descriptions.Item label="完成时间">{selectedRecord.endTime || '-'}</Descriptions.Item>
             </Descriptions>
+
+            {selectedRecord.result && (
+              <>
+                <Divider />
+                <Title level={5}>检测结果</Title>
+                <Descriptions bordered column={2} size="small">
+                  <Descriptions.Item label="检测值">
+                    <span style={{ fontWeight: 600 }}>
+                      {selectedRecord.result.value} {selectedRecord.result.unit}
+                    </span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="结果判定">
+                    <Tag color={selectedRecord.result.result === 'qualified' ? 'success' : 'error'}>
+                      {selectedRecord.result.result === 'qualified' ? '合格' : '不合格'}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="平均值">{selectedRecord.result.average}</Descriptions.Item>
+                  <Descriptions.Item label="RSD(%)">{selectedRecord.result.rsd}</Descriptions.Item>
+                  <Descriptions.Item label="环境温度">
+                    {selectedRecord.result.environment.temperature}℃
+                  </Descriptions.Item>
+                  <Descriptions.Item label="环境湿度">
+                    {selectedRecord.result.environment.humidity}%
+                  </Descriptions.Item>
+                  <Descriptions.Item label="检测时间">{selectedRecord.result.testTime}</Descriptions.Item>
+                  <Descriptions.Item label="操作人员">{selectedRecord.result.operator}</Descriptions.Item>
+                  <Descriptions.Item label="试剂批号">{selectedRecord.result.reagentBatch || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="标准物质">{selectedRecord.result.standardSubstance || '-'}</Descriptions.Item>
+                </Descriptions>
+                <div style={{ marginTop: 8 }}>
+                  <p style={{ marginBottom: 4 }}><b>原始数据：</b></p>
+                  <div>
+                    {selectedRecord.result.rawData.map((val, idx) => (
+                      <Tag key={idx} color="blue">{val}</Tag>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
             {selectedRecord.abnormal && (
               <div style={{ marginTop: 16, padding: 12, background: '#fff2f0', borderRadius: 4 }}>
                 <p style={{ color: '#ff4d4f', fontWeight: 600, marginBottom: 4 }}>
@@ -312,12 +517,146 @@ const TaskList = () => {
             {selectedRecord.recheck && (
               <div style={{ marginTop: 12, padding: 12, background: '#fff7e6', borderRadius: 4 }}>
                 <p style={{ color: '#fa8c16', fontWeight: 600, marginBottom: 4 }}>
-                  复检次数：{selectedRecord.recheckCount} 次
+                  <RetweetOutlined /> 复检次数：{selectedRecord.recheckCount} 次
                 </p>
               </div>
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title="提交检测结果"
+        open={resultModalOpen}
+        onCancel={() => setResultModalOpen(false)}
+        footer={null}
+        width={600}
+        maskClosable={false}
+      >
+        <Form form={form} layout="vertical" onFinish={handleResultSubmit}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="result"
+                label="检测结果值"
+                rules={[{ required: true, message: '请输入检测结果' }]}
+              >
+                <InputNumber style={{ width: '100%' }} placeholder="请输入检测值" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="deviation"
+                label="偏差值"
+              >
+                <InputNumber style={{ width: '100%' }} placeholder="可选" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item
+            name="rawData"
+            label="原始数据（多个用逗号分隔）"
+            rules={[{ required: true, message: '请输入原始数据' }]}
+          >
+            <TextArea rows={2} placeholder="例如：25.3, 25.1, 25.5" />
+          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="temperature"
+                label="环境温度(℃)"
+                initialValue={25}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} max={50} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="humidity"
+                label="环境湿度(%)"
+                initialValue={50}
+              >
+                <InputNumber style={{ width: '100%' }} min={0} max={100} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="reagentId"
+                label="使用试剂"
+              >
+                <Select placeholder="请选择试剂" allowClear>
+                  {availableReagents.map((r) => (
+                    <Option key={r.id} value={r.id}>
+                      {r.name}（批号：{r.batchNo}，库存：{r.quantity}{r.unit}）
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="reagentUsage"
+                label="使用量"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} placeholder="请输入使用量" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item
+            name="standardSubstance"
+            label="标准物质"
+          >
+            <Input placeholder="可选" />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">
+                提交结果
+              </Button>
+              <Button onClick={() => setResultModalOpen(false)}>取消</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="异常处理"
+        open={abnormalModalOpen}
+        onCancel={() => setAbnormalModalOpen(false)}
+        footer={null}
+        width={500}
+        maskClosable={false}
+      >
+        <Form form={abnormalForm} layout="vertical" onFinish={handleAbnormalSubmit}>
+          <Form.Item
+            name="action"
+            label="处理方式"
+            rules={[{ required: true, message: '请选择处理方式' }]}
+          >
+            <Select placeholder="请选择">
+              <Option value="recheck">安排复检</Option>
+              <Option value="approve">确认异常，任务通过</Option>
+              <Option value="reject">驳回任务</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="异常原因/处理说明"
+            rules={[{ required: true, message: '请输入原因说明' }]}
+          >
+            <TextArea rows={4} placeholder="请详细说明异常原因或处理意见..." />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">
+                确认处理
+              </Button>
+              <Button onClick={() => setAbnormalModalOpen(false)}>取消</Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

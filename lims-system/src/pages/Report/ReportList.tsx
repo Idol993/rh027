@@ -15,30 +15,34 @@ import {
   Statistic,
   Timeline,
   Form,
-  Input as AntInput,
+  Typography,
+  Divider,
+  Popconfirm,
 } from 'antd';
 import {
   SearchOutlined,
   EyeOutlined,
   FileDoneOutlined,
   CheckOutlined,
-  FileTextOutlined,
   DownloadOutlined,
   PrinterOutlined,
+  PlusOutlined,
   SafetyCertificateOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { Report, ReportStatus } from '../../types';
+import { Report, ReportStatus, ReportItem, EntrustOrder, TestTask } from '../../types';
 
 const { Option } = Select;
-const { TextArea } = AntInput;
+const { TextArea } = Input;
+const { Title, Text } = Typography;
 
 const statusMap: Record<ReportStatus, { color: string; text: string }> = {
   draft: { color: 'default', text: '草稿' },
   reviewing: { color: 'processing', text: '审核中' },
-  level1_signed: { color: 'blue', text: '一级审核' },
-  level2_signed: { color: 'purple', text: '二级审核' },
+  level1_signed: { color: 'blue', text: '一级已签' },
+  level2_signed: { color: 'purple', text: '二级已签' },
   issued: { color: 'success', text: '已签发' },
   voided: { color: 'error', text: '已作废' },
 };
@@ -46,12 +50,106 @@ const statusMap: Record<ReportStatus, { color: string; text: string }> = {
 const ReportList = () => {
   const reports = useStore((state) => state.reports);
   const updateReportStatus = useStore((state) => state.updateReportStatus);
+  const addReport = useStore((state) => state.addReport);
+  const updateReport = useStore((state) => state.updateReport);
+  const orders = useStore((state) => state.orders);
+  const tasks = useStore((state) => state.tasks);
+  const samples = useStore((state) => state.samples);
   const currentUser = useStore((state) => state.currentUser);
+
   const [selectedRecord, setSelectedRecord] = useState<Report | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [signModalOpen, setSignModalOpen] = useState(false);
   const [signLevel, setSignLevel] = useState<1 | 2 | 3>(1);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [form] = Form.useForm();
+  const [createForm] = Form.useForm();
+
+  const completedTasks = tasks.filter((t) => t.status === 'completed' && t.result);
+
+  const handleView = (record: Report) => {
+    setSelectedRecord(record);
+    setViewModalOpen(true);
+  };
+
+  const handlePreview = (record: Report) => {
+    setSelectedRecord(record);
+    setPreviewModalOpen(true);
+  };
+
+  const handleSign = (record: Report, level: 1 | 2 | 3) => {
+    setSelectedRecord(record);
+    setSignLevel(level);
+    form.resetFields();
+    setSignModalOpen(true);
+  };
+
+  const handleSignSubmit = (values: any) => {
+    if (!selectedRecord) return;
+
+    let newStatus: ReportStatus = 'level1_signed';
+    if (signLevel === 2) newStatus = 'level2_signed';
+    if (signLevel === 3) newStatus = 'issued';
+
+    updateReportStatus(selectedRecord.id, newStatus, { opinion: values.opinion });
+    message.success(`第${signLevel}级签名成功`);
+    setSignModalOpen(false);
+  };
+
+  const handleCreate = () => {
+    createForm.resetFields();
+    setCreateModalOpen(true);
+  };
+
+  const handleCreateSubmit = (values: any) => {
+    const order = orders.find((o) => o.id === values.entrustId);
+    if (!order) return;
+
+    const relatedSamples = samples.filter((s) => s.entrustId === order.id);
+    const relatedTasks = tasks.filter(
+      (t) => t.status === 'completed' && t.result && relatedSamples.some((s) => s.id === t.sampleId)
+    );
+
+    if (relatedTasks.length === 0) {
+      message.error('该委托下没有已完成的检测任务，无法生成报告');
+      return;
+    }
+
+    const reportItems: ReportItem[] = relatedTasks.map((task) => ({
+      sampleSid: task.sampleSid,
+      sampleName: task.sampleName,
+      testItem: task.testItem.name,
+      standard: task.testItem.standard,
+      limit: task.testItem.limit,
+      result: String(task.result?.value || ''),
+      unit: task.testItem.unit,
+      conclusion: task.result?.result || 'pending',
+    }));
+
+    const allQualified = reportItems.every((item) => item.conclusion === 'qualified');
+
+    const newReport = {
+      entrustId: order.id,
+      entrustNo: order.orderNo,
+      sampleIds: relatedSamples.map((s) => s.id),
+      status: 'draft' as ReportStatus,
+      conclusion: allQualified
+        ? `本次检测共${reportItems.length}项，全部符合${order.standards?.[0] || '相关标准'}要求`
+        : `本次检测共${reportItems.length}项，其中存在不合格项`,
+      createdAt: new Date().toLocaleString('zh-CN'),
+      createdBy: currentUser?.name || '系统',
+      items: reportItems,
+    };
+
+    addReport(newReport);
+    message.success('报告草稿创建成功');
+    setCreateModalOpen(false);
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
 
   const columns: ColumnsType<Report> = [
     {
@@ -62,23 +160,31 @@ const ReportList = () => {
       render: (text) => <a>{text}</a>,
     },
     {
-      title: '关联委托',
+      title: '委托单号',
       dataIndex: 'entrustNo',
       key: 'entrustNo',
       width: 140,
     },
     {
       title: '检测项目数',
-      dataIndex: 'items',
-      key: 'items',
+      key: 'itemCount',
       width: 100,
-      render: (items) => items?.length || 0,
+      render: (_, record) => record.items?.length || 0,
     },
     {
-      title: '创建人',
-      dataIndex: 'createdBy',
-      key: 'createdBy',
+      title: '报告结论',
+      dataIndex: 'conclusion',
+      key: 'conclusion',
+      ellipsis: true,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
       width: 100,
+      render: (status: ReportStatus) => (
+        <Tag color={statusMap[status].color}>{statusMap[status].text}</Tag>
+      ),
     },
     {
       title: '创建时间',
@@ -94,18 +200,9 @@ const ReportList = () => {
       render: (text) => text || '-',
     },
     {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 120,
-      render: (status: ReportStatus) => (
-        <Tag color={statusMap[status].color}>{statusMap[status].text}</Tag>
-      ),
-    },
-    {
       title: '操作',
       key: 'action',
-      width: 240,
+      width: 280,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -117,20 +214,19 @@ const ReportList = () => {
           >
             查看
           </Button>
-          {record.status === 'draft' && (
+          <Button
+            type="link"
+            size="small"
+            icon={<FileDoneOutlined />}
+            onClick={() => handlePreview(record)}
+          >
+            预览
+          </Button>
+          {record.status === 'draft' && (currentUser?.role === 'tester' || currentUser?.role === 'reviewer') && (
             <Button
               type="link"
               size="small"
-              icon={<FileDoneOutlined />}
-            >
-              编辑
-            </Button>
-          )}
-          {(record.status === 'draft' || record.status === 'reviewing') && currentUser?.role === 'tester' && (
-            <Button
-              type="link"
-              size="small"
-              icon={<CheckOutlined />}
+              icon={<SafetyCertificateOutlined />}
               onClick={() => handleSign(record, 1)}
             >
               一级签名
@@ -150,7 +246,7 @@ const ReportList = () => {
             <Button
               type="link"
               size="small"
-              icon={<SafetyCertificateOutlined />}
+              icon={<CheckOutlined />}
               onClick={() => handleSign(record, 3)}
             >
               批准签发
@@ -162,6 +258,7 @@ const ReportList = () => {
                 type="link"
                 size="small"
                 icon={<DownloadOutlined />}
+                onClick={() => handlePreview(record)}
               >
                 下载
               </Button>
@@ -169,6 +266,7 @@ const ReportList = () => {
                 type="link"
                 size="small"
                 icon={<PrinterOutlined />}
+                onClick={() => handlePreview(record)}
               >
                 打印
               </Button>
@@ -179,39 +277,27 @@ const ReportList = () => {
     },
   ];
 
-  const handleView = (record: Report) => {
-    setSelectedRecord(record);
-    setViewModalOpen(true);
-  };
-
-  const handleSign = (record: Report, level: 1 | 2 | 3) => {
-    setSelectedRecord(record);
-    setSignLevel(level);
-    form.resetFields();
-    setSignModalOpen(true);
-  };
-
-  const handleSignSubmit = (values: any) => {
-    if (!selectedRecord) return;
-    let nextStatus: ReportStatus = 'level1_signed';
-    if (signLevel === 2) nextStatus = 'level2_signed';
-    if (signLevel === 3) nextStatus = 'issued';
-    
-    updateReportStatus(selectedRecord.id, nextStatus, values);
-    message.success(`第${signLevel}级签名成功`);
-    setSignModalOpen(false);
-  };
-
   const stats = {
     total: reports.length,
     draft: reports.filter((r) => r.status === 'draft').length,
-    reviewing: reports.filter((r) => r.status === 'reviewing' || r.status === 'level1_signed' || r.status === 'level2_signed').length,
+    reviewing: reports.filter((r) => r.status === 'level1_signed' || r.status === 'level2_signed').length,
     issued: reports.filter((r) => r.status === 'issued').length,
   };
 
+  const availableOrders = orders.filter(
+    (o) => o.status === 'approved' && !reports.some((r) => r.entrustId === o.id && r.status !== 'voided')
+  );
+
   return (
     <div>
-      <Card>
+      <Card
+        title="报告管理"
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            编制报告
+          </Button>
+        }
+      >
         <div style={{ marginBottom: 20 }}>
           <Row gutter={16}>
             <Col span={6}>
@@ -219,7 +305,7 @@ const ReportList = () => {
                 <Statistic
                   title="报告总数"
                   value={stats.total}
-                  prefix={<FileTextOutlined style={{ color: '#1890ff' }} />}
+                  prefix={<FileDoneOutlined style={{ color: '#1890ff' }} />}
                   valueStyle={{ fontSize: 20 }}
                 />
               </Card>
@@ -229,16 +315,6 @@ const ReportList = () => {
                 <Statistic
                   title="草稿"
                   value={stats.draft}
-                  prefix={<FileTextOutlined style={{ color: '#8c8c8c' }} />}
-                  valueStyle={{ fontSize: 20, color: '#8c8c8c' }}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card size="small">
-                <Statistic
-                  title="审核中"
-                  value={stats.reviewing}
                   prefix={<SafetyCertificateOutlined style={{ color: '#faad14' }} />}
                   valueStyle={{ fontSize: 20, color: '#faad14' }}
                 />
@@ -247,9 +323,19 @@ const ReportList = () => {
             <Col span={6}>
               <Card size="small">
                 <Statistic
+                  title="审核中"
+                  value={stats.reviewing}
+                  prefix={<SafetyCertificateOutlined style={{ color: '#722ed1' }} />}
+                  valueStyle={{ fontSize: 20, color: '#722ed1' }}
+                />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card size="small">
+                <Statistic
                   title="已签发"
                   value={stats.issued}
-                  prefix={<FileDoneOutlined style={{ color: '#52c41a' }} />}
+                  prefix={<CheckOutlined style={{ color: '#52c41a' }} />}
                   valueStyle={{ fontSize: 20, color: '#52c41a' }}
                 />
               </Card>
@@ -265,7 +351,7 @@ const ReportList = () => {
               style={{ width: 180 }}
             />
             <Input placeholder="委托单号" style={{ width: 160 }} />
-            <Select placeholder="报告状态" style={{ width: 120 }} allowClear>
+            <Select placeholder="状态" style={{ width: 120 }} allowClear>
               {Object.entries(statusMap).map(([key, val]) => (
                 <Option key={key} value={key}>
                   {val.text}
@@ -283,7 +369,7 @@ const ReportList = () => {
           columns={columns}
           dataSource={reports}
           rowKey="id"
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1300 }}
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Card>
@@ -297,105 +383,166 @@ const ReportList = () => {
             关闭
           </Button>,
         ]}
-        width={800}
+        width={760}
       >
         {selectedRecord && (
           <div>
             <Descriptions bordered column={2} size="small">
-              <Descriptions.Item label="报告编号" span={2}>
+              <Descriptions.Item label="报告编号">
                 <Space>
                   <span style={{ fontWeight: 600 }}>{selectedRecord.reportNo}</span>
                   <Tag color={statusMap[selectedRecord.status].color}>
                     {statusMap[selectedRecord.status].text}
                   </Tag>
+                  {selectedRecord.status === 'issued' && (
+                    <Tag icon={<LockOutlined />} color="success">
+                      已锁定
+                    </Tag>
+                  )}
                 </Space>
               </Descriptions.Item>
-              <Descriptions.Item label="关联委托">{selectedRecord.entrustNo}</Descriptions.Item>
-              <Descriptions.Item label="创建人">{selectedRecord.createdBy}</Descriptions.Item>
+              <Descriptions.Item label="委托单号">{selectedRecord.entrustNo}</Descriptions.Item>
               <Descriptions.Item label="创建时间">{selectedRecord.createdAt}</Descriptions.Item>
+              <Descriptions.Item label="创建人">{selectedRecord.createdBy}</Descriptions.Item>
               <Descriptions.Item label="签发时间">{selectedRecord.issuedAt || '-'}</Descriptions.Item>
+              <Descriptions.Item label="报告结论" span={2}>
+                {selectedRecord.conclusion || '-'}
+              </Descriptions.Item>
             </Descriptions>
 
-            <div style={{ marginTop: 16 }}>
-              <h4>检测结果</h4>
-              <Table
-                dataSource={selectedRecord.items}
-                size="small"
-                pagination={false}
-                rowKey={(record, index) => index?.toString() || ''}
-                columns={[
-                  { title: '样品编号', dataIndex: 'sampleSid', key: 'sampleSid', width: 140 },
-                  { title: '检测项目', dataIndex: 'testItem', key: 'testItem' },
-                  { title: '标准依据', dataIndex: 'standard', key: 'standard' },
-                  { title: '限值', dataIndex: 'limit', key: 'limit' },
-                  { title: '检测结果', dataIndex: 'result', key: 'result' },
-                  { title: '单位', dataIndex: 'unit', key: 'unit' },
-                  {
-                    title: '结论',
-                    dataIndex: 'conclusion',
-                    key: 'conclusion',
-                    render: (c) => (
-                      <Tag color={c === 'qualified' ? 'success' : 'error'}>
-                        {c === 'qualified' ? '合格' : '不合格'}
-                      </Tag>
-                    ),
-                  },
-                ]}
-              />
-            </div>
+            <Divider />
+            <Title level={5}>检测结果明细</Title>
+            <Table
+              dataSource={selectedRecord.items || []}
+              rowKey={(record, idx) => `${record.sampleSid}-${record.testItem}-${idx}`}
+              size="small"
+              pagination={false}
+              scroll={{ x: 600 }}
+              columns={[
+                { title: '样品编号', dataIndex: 'sampleSid', key: 'sampleSid', width: 140 },
+                { title: '样品名称', dataIndex: 'sampleName', key: 'sampleName', width: 120 },
+                { title: '检测项目', dataIndex: 'testItem', key: 'testItem', width: 100 },
+                { title: '检测标准', dataIndex: 'standard', key: 'standard' },
+                { title: '限值', dataIndex: 'limit', key: 'limit', width: 100 },
+                {
+                  title: '结果',
+                  key: 'result',
+                  width: 100,
+                  render: (_, record) => (
+                    <Space>
+                      <span>{record.result}</span>
+                      <span style={{ color: '#999' }}>{record.unit}</span>
+                    </Space>
+                  ),
+                },
+                {
+                  title: '判定',
+                  key: 'conclusion',
+                  width: 80,
+                  render: (_, record) => (
+                    <Tag color={record.conclusion === 'qualified' ? 'success' : 'error'}>
+                      {record.conclusion === 'qualified' ? '合格' : '不合格'}
+                    </Tag>
+                  ),
+                },
+              ]}
+            />
 
-            <div style={{ marginTop: 20 }}>
-              <h4>三级审核流程</h4>
-              <Timeline>
-                <Timeline.Item color={selectedRecord.level1Sign ? 'green' : 'gray'}>
-                  <p style={{ margin: 0 }}>一级签名（检测员）</p>
-                  {selectedRecord.level1Sign ? (
-                    <p style={{ color: '#666', fontSize: 12, margin: 0 }}>
-                      {selectedRecord.level1Sign.signer} | {selectedRecord.level1Sign.signTime}
-                      <br />
-                      意见：{selectedRecord.level1Sign.opinion}
-                    </p>
-                  ) : (
-                    <p style={{ color: '#999', fontSize: 12, margin: 0 }}>待签名</p>
-                  )}
-                </Timeline.Item>
-                <Timeline.Item color={selectedRecord.level2Sign ? 'green' : 'gray'}>
-                  <p style={{ margin: 0 }}>二级审核（审核员）</p>
-                  {selectedRecord.level2Sign ? (
-                    <p style={{ color: '#666', fontSize: 12, margin: 0 }}>
-                      {selectedRecord.level2Sign.signer} | {selectedRecord.level2Sign.signTime}
-                      <br />
-                      意见：{selectedRecord.level2Sign.opinion}
-                    </p>
-                  ) : (
-                    <p style={{ color: '#999', fontSize: 12, margin: 0 }}>待审核</p>
-                  )}
-                </Timeline.Item>
-                <Timeline.Item color={selectedRecord.level3Sign ? 'green' : 'gray'}>
-                  <p style={{ margin: 0 }}>三级签发（授权签字人）</p>
-                  {selectedRecord.level3Sign ? (
-                    <p style={{ color: '#666', fontSize: 12, margin: 0 }}>
-                      {selectedRecord.level3Sign.signer} | {selectedRecord.level3Sign.signTime}
-                      <br />
-                      意见：{selectedRecord.level3Sign.opinion}
-                    </p>
-                  ) : (
-                    <p style={{ color: '#999', fontSize: 12, margin: 0 }}>待签发</p>
-                  )}
-                </Timeline.Item>
-              </Timeline>
-            </div>
+            <Divider />
+            <Title level={5}>审核流程</Title>
+            <Timeline
+              items={[
+                {
+                  color: selectedRecord.level1Sign ? 'green' : 'gray',
+                  children: (
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600 }}>一级签名（检测员）</p>
+                      {selectedRecord.level1Sign ? (
+                        <>
+                          <p style={{ margin: 0, color: '#666' }}>
+                            签名人：{selectedRecord.level1Sign.signer}
+                          </p>
+                          <p style={{ margin: 0, color: '#999' }}>
+                            时间：{selectedRecord.level1Sign.signTime}
+                          </p>
+                          <p style={{ margin: 0, color: '#666' }}>
+                            意见：{selectedRecord.level1Sign.opinion}
+                          </p>
+                        </>
+                      ) : (
+                        <p style={{ margin: 0, color: '#999' }}>待签名</p>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  color: selectedRecord.level2Sign ? 'blue' : 'gray',
+                  children: (
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600 }}>二级审核（审核员）</p>
+                      {selectedRecord.level2Sign ? (
+                        <>
+                          <p style={{ margin: 0, color: '#666' }}>
+                            审核人：{selectedRecord.level2Sign.signer}
+                          </p>
+                          <p style={{ margin: 0, color: '#999' }}>
+                            时间：{selectedRecord.level2Sign.signTime}
+                          </p>
+                          <p style={{ margin: 0, color: '#666' }}>
+                            意见：{selectedRecord.level2Sign.opinion}
+                          </p>
+                        </>
+                      ) : (
+                        <p style={{ margin: 0, color: '#999' }}>待审核</p>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  color: selectedRecord.level3Sign ? 'purple' : 'gray',
+                  children: (
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600 }}>三级签发（授权签字人）</p>
+                      {selectedRecord.level3Sign ? (
+                        <>
+                          <p style={{ margin: 0, color: '#666' }}>
+                            签发人：{selectedRecord.level3Sign.signer}
+                          </p>
+                          <p style={{ margin: 0, color: '#999' }}>
+                            时间：{selectedRecord.level3Sign.signTime}
+                          </p>
+                          <p style={{ margin: 0, color: '#666' }}>
+                            意见：{selectedRecord.level3Sign.opinion}
+                          </p>
+                        </>
+                      ) : (
+                        <p style={{ margin: 0, color: '#999' }}>待签发</p>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+            />
           </div>
         )}
       </Modal>
 
       <Modal
-        title={`第${signLevel}级电子签名`}
+        title="电子签名"
         open={signModalOpen}
         onCancel={() => setSignModalOpen(false)}
         footer={null}
         width={500}
+        maskClosable={false}
       >
+        <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+          <p style={{ margin: 0 }}>
+            当前操作：<b>第 {signLevel} 级电子签名</b>
+          </p>
+          <p style={{ margin: 0, color: '#666' }}>
+            操作员：{currentUser?.name}
+          </p>
+        </div>
         <Form form={form} layout="vertical" onFinish={handleSignSubmit}>
           <Form.Item
             name="opinion"
@@ -404,7 +551,13 @@ const ReportList = () => {
           >
             <TextArea
               rows={4}
-              placeholder={signLevel === 1 ? '请确认原始数据真实有效...' : signLevel === 2 ? '请审核检测方法和结果...' : '请确认报告合规有效...'}
+              placeholder={
+                signLevel === 1
+                  ? '请输入原始数据审核意见...'
+                  : signLevel === 2
+                  ? '请输入报告审核意见...'
+                  : '请输入批准签发意见...'
+              }
             />
           </Form.Item>
           <Form.Item>
@@ -416,6 +569,144 @@ const ReportList = () => {
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="编制报告"
+        open={createModalOpen}
+        onCancel={() => setCreateModalOpen(false)}
+        footer={null}
+        width={600}
+        maskClosable={false}
+      >
+        <Form form={createForm} layout="vertical" onFinish={handleCreateSubmit}>
+          <Form.Item
+            name="entrustId"
+            label="选择委托单"
+            rules={[{ required: true, message: '请选择委托单' }]}
+            extra="只显示已通过评审且尚未生成报告的委托单"
+          >
+            <Select placeholder="请选择委托单">
+              {availableOrders.map((order) => (
+                <Option key={order.id} value={order.id}>
+                  {order.orderNo} - {order.sampleName}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">
+                生成报告草稿
+              </Button>
+              <Button onClick={() => setCreateModalOpen(false)}>取消</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="报告预览"
+        open={previewModalOpen}
+        onCancel={() => setPreviewModalOpen(false)}
+        width={800}
+        footer={[
+          <Button key="print" icon={<PrinterOutlined />} onClick={handlePrint}>
+            打印
+          </Button>,
+          <Button key="download" type="primary" icon={<DownloadOutlined />}>
+            下载PDF
+          </Button>,
+          <Button key="close" onClick={() => setPreviewModalOpen(false)}>
+            关闭
+          </Button>,
+        ]}
+      >
+        {selectedRecord && (
+          <div className="report-preview" id="report-print-area">
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <Title level={3} style={{ marginBottom: 4 }}>检测报告</Title>
+              <Text type="secondary">TEST REPORT</Text>
+              <div style={{ marginTop: 12, fontSize: 16, fontWeight: 600, color: '#1890ff' }}>
+                报告编号：{selectedRecord.reportNo}
+              </div>
+            </div>
+
+            <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="委托单位">
+                {orders.find((o) => o.id === selectedRecord.entrustId)?.clientName || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="委托单号">{selectedRecord.entrustNo}</Descriptions.Item>
+              <Descriptions.Item label="样品数量">
+                {selectedRecord.sampleIds?.length || 0} 件
+              </Descriptions.Item>
+              <Descriptions.Item label="报告日期">
+                {selectedRecord.issuedAt || selectedRecord.createdAt}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ fontWeight: 600, margin: '16px 0 12px 0', fontSize: 15, borderLeft: '3px solid #1890ff', paddingLeft: 8 }}>
+              检测结果
+            </div>
+            <Table
+              dataSource={selectedRecord.items || []}
+              rowKey={(record, idx) => `preview-${record.sampleSid}-${record.testItem}-${idx}`}
+              size="small"
+              pagination={false}
+              bordered
+              columns={[
+                { title: '序号', key: 'idx', width: 50, render: (_, __, idx) => idx + 1 },
+                { title: '样品编号', dataIndex: 'sampleSid', key: 'sampleSid' },
+                { title: '检测项目', dataIndex: 'testItem', key: 'testItem' },
+                { title: '检测标准', dataIndex: 'standard', key: 'standard' },
+                { title: '限值要求', dataIndex: 'limit', key: 'limit' },
+                { title: '检测结果', key: 'result', render: (_, r) => `${r.result} ${r.unit}` },
+                {
+                  title: '单项判定',
+                  key: 'judge',
+                  width: 80,
+                  render: (_, r) =>
+                    r.conclusion === 'qualified' ? '合格' : '不合格',
+                },
+              ]}
+            />
+
+            <div style={{ marginTop: 16, padding: 12, background: '#f6ffed', borderRadius: 4 }}>
+              <p style={{ margin: 0, fontWeight: 600, color: '#389e0d' }}>
+                报告结论：
+              </p>
+              <p style={{ margin: 4, color: '#389e0d' }}>{selectedRecord.conclusion}</p>
+            </div>
+
+            <Divider />
+            <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 20 }}>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ marginBottom: 24 }}>检测员（一级）</p>
+                <p style={{ borderTop: '1px solid #000', width: 120, paddingTop: 8, margin: 0 }}>
+                  {selectedRecord.level1Sign?.signer || '____________'}
+                </p>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ marginBottom: 24 }}>审核员（二级）</p>
+                <p style={{ borderTop: '1px solid #000', width: 120, paddingTop: 8, margin: 0 }}>
+                  {selectedRecord.level2Sign?.signer || '____________'}
+                </p>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ marginBottom: 24 }}>授权签字人（三级）</p>
+                <p style={{ borderTop: '1px solid #000', width: 120, paddingTop: 8, margin: 0 }}>
+                  {selectedRecord.level3Sign?.signer || '____________'}
+                </p>
+              </div>
+            </div>
+
+            {selectedRecord.status === 'issued' && (
+              <div style={{ textAlign: 'center', marginTop: 20, color: '#52c41a' }}>
+                <LockOutlined /> 本报告已签发，具有法律效力
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

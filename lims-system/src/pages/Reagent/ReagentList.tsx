@@ -8,12 +8,17 @@ import {
   Input,
   Select,
   Modal,
+  Form,
+  InputNumber,
   message,
   Descriptions,
   Row,
   Col,
   Statistic,
   Progress,
+  Tabs,
+  List,
+  Typography,
 } from 'antd';
 import {
   SearchOutlined,
@@ -24,12 +29,15 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   InboxOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { Reagent, ReagentStatus } from '../../types';
+import { Reagent, ReagentStatus, ReagentUsage } from '../../types';
 
 const { Option } = Select;
+const { TextArea } = Input;
+const { Title } = Typography;
 
 const statusMap: Record<ReagentStatus, { color: string; text: string }> = {
   in_stock: { color: 'success', text: '库存充足' },
@@ -41,8 +49,28 @@ const statusMap: Record<ReagentStatus, { color: string; text: string }> = {
 
 const ReagentList = () => {
   const reagents = useStore((state) => state.reagents);
+  const updateReagent = useStore((state) => state.updateReagent);
+  const addReagentUsage = useStore((state) => state.addReagentUsage);
+  const currentUser = useStore((state) => state.currentUser);
+  const samples = useStore((state) => state.samples);
+
   const [selectedRecord, setSelectedRecord] = useState<Reagent | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [useModalOpen, setUseModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('list');
+  const [form] = Form.useForm();
+
+  const allUsageRecords: (ReagentUsage & { reagentName: string; batchNo: string })[] = [];
+  reagents.forEach((r) => {
+    r.usageRecords?.forEach((u) => {
+      allUsageRecords.push({
+        ...u,
+        reagentName: r.name,
+        batchNo: r.batchNo,
+      });
+    });
+  });
+  allUsageRecords.sort((a, b) => new Date(b.usedAt).getTime() - new Date(a.usedAt).getTime());
 
   const columns: ColumnsType<Reagent> = [
     {
@@ -82,29 +110,28 @@ const ReagentList = () => {
       width: 180,
     },
     {
-      title: '证书编号',
-      dataIndex: 'certificateNo',
-      key: 'certificateNo',
-      width: 140,
-    },
-    {
       title: '有效期至',
       dataIndex: 'expiryDate',
       key: 'expiryDate',
       width: 120,
     },
     {
+      title: '存储条件',
+      dataIndex: 'storageCondition',
+      key: 'storageCondition',
+      width: 140,
+    },
+    {
       title: '库存状态',
       key: 'status',
       width: 100,
       render: (_, record) => {
-        const percent = (record.quantity / record.safetyStock) * 100;
         let status: ReagentStatus = 'in_stock';
         if (record.quantity === 0) status = 'used_up';
         else if (record.quantity < record.safetyStock) status = 'low_stock';
-        return (
-          <Tag color={statusMap[status].color}>{statusMap[status].text}</Tag>
-        );
+        else if (record.status === 'expired') status = 'expired';
+        else if (record.status === 'expiring') status = 'expiring';
+        return <Tag color={statusMap[status].color}>{statusMap[status].text}</Tag>;
       },
     },
     {
@@ -112,30 +139,118 @@ const ReagentList = () => {
       key: 'action',
       width: 150,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleView(record)}
-          >
-            详情
-          </Button>
-          <Button
-            type="link"
-            size="small"
-          >
-            领用
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const canUse = record.status !== 'expired' && record.status !== 'used_up' && record.quantity > 0;
+        return (
+          <Space size="small">
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => handleView(record)}
+            >
+              详情
+            </Button>
+            {canUse && (
+              <Button
+                type="link"
+                size="small"
+                icon={<ShoppingOutlined />}
+                onClick={() => handleUse(record)}
+              >
+                领用
+              </Button>
+            )}
+          </Space>
+        );
+      },
+    },
+  ];
+
+  const usageColumns: ColumnsType<ReagentUsage & { reagentName: string; batchNo: string }> = [
+    {
+      title: '试剂名称',
+      dataIndex: 'reagentName',
+      key: 'reagentName',
+      width: 160,
+    },
+    {
+      title: '批号',
+      dataIndex: 'batchNo',
+      key: 'batchNo',
+      width: 100,
+    },
+    {
+      title: '使用量',
+      key: 'quantity',
+      width: 80,
+      render: (_, record) => `${record.quantity}`,
+    },
+    {
+      title: '领用人',
+      dataIndex: 'user',
+      key: 'user',
+      width: 100,
+    },
+    {
+      title: '用途',
+      dataIndex: 'purpose',
+      key: 'purpose',
+    },
+    {
+      title: '关联样品',
+      key: 'sample',
+      width: 140,
+      render: (_, record) => {
+        const sample = samples.find((s) => s.id === record.sampleId);
+        return sample ? sample.sid : '-';
+      },
+    },
+    {
+      title: '使用时间',
+      dataIndex: 'usedAt',
+      key: 'usedAt',
+      width: 160,
     },
   ];
 
   const handleView = (record: Reagent) => {
     setSelectedRecord(record);
     setViewModalOpen(true);
+  };
+
+  const handleUse = (record: Reagent) => {
+    if (record.status === 'expired') {
+      message.error('该试剂已过期，禁止领用');
+      return;
+    }
+    if (record.quantity <= 0) {
+      message.error('该试剂库存不足');
+      return;
+    }
+    setSelectedRecord(record);
+    form.resetFields();
+    setUseModalOpen(true);
+  };
+
+  const handleUseSubmit = (values: any) => {
+    if (!selectedRecord) return;
+    if (values.quantity > selectedRecord.quantity) {
+      message.error('领用数量不能超过库存');
+      return;
+    }
+
+    addReagentUsage(selectedRecord.id, {
+      reagentId: selectedRecord.id,
+      quantity: values.quantity,
+      user: currentUser?.name || '',
+      purpose: values.purpose,
+      sampleId: values.sampleId,
+      usedAt: new Date().toLocaleString('zh-CN'),
+    });
+
+    message.success('领用成功');
+    setUseModalOpen(false);
   };
 
   const stats = {
@@ -145,6 +260,59 @@ const ReagentList = () => {
     expired: reagents.filter((r) => r.status === 'expired').length,
     expiring: reagents.filter((r) => r.status === 'expiring').length,
   };
+
+  const tabItems = [
+    {
+      key: 'list',
+      label: '试剂库存',
+      children: (
+        <div>
+          <div className="search-bar" style={{ marginBottom: 16 }}>
+            <Space wrap>
+              <Input
+                placeholder="试剂名称"
+                prefix={<SearchOutlined />}
+                style={{ width: 200 }}
+              />
+              <Input placeholder="批号" style={{ width: 140 }} />
+              <Select placeholder="状态" style={{ width: 120 }} allowClear>
+                {Object.entries(statusMap).map(([key, val]) => (
+                  <Option key={key} value={key}>
+                    {val.text}
+                  </Option>
+                ))}
+              </Select>
+              <Button type="primary" icon={<SearchOutlined />}>
+                查询
+              </Button>
+              <Button>重置</Button>
+            </Space>
+          </div>
+
+          <Table
+            columns={columns}
+            dataSource={reagents}
+            rowKey="id"
+            scroll={{ x: 1300 }}
+            pagination={{ pageSize: 10, showSizeChanger: true }}
+          />
+        </div>
+      ),
+    },
+    {
+      key: 'usage',
+      label: '使用记录',
+      children: (
+        <Table
+          columns={usageColumns}
+          dataSource={allUsageRecords}
+          rowKey="id"
+          scroll={{ x: 1000 }}
+          pagination={{ pageSize: 10, showSizeChanger: true }}
+        />
+      ),
+    },
+  ];
 
   return (
     <div>
@@ -204,35 +372,7 @@ const ReagentList = () => {
           </Row>
         </div>
 
-        <div className="search-bar" style={{ marginBottom: 16 }}>
-          <Space wrap>
-            <Input
-              placeholder="试剂名称"
-              prefix={<SearchOutlined />}
-              style={{ width: 200 }}
-            />
-            <Input placeholder="批号" style={{ width: 140 }} />
-            <Select placeholder="状态" style={{ width: 120 }} allowClear>
-              {Object.entries(statusMap).map(([key, val]) => (
-                <Option key={key} value={key}>
-                  {val.text}
-                </Option>
-              ))}
-            </Select>
-            <Button type="primary" icon={<SearchOutlined />}>
-              查询
-            </Button>
-            <Button>重置</Button>
-          </Space>
-        </div>
-
-        <Table
-          columns={columns}
-          dataSource={reagents}
-          rowKey="id"
-          scroll={{ x: 1300 }}
-          pagination={{ pageSize: 10, showSizeChanger: true }}
-        />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
 
       <Modal
@@ -284,12 +424,95 @@ const ReagentList = () => {
                 status={selectedRecord.quantity < selectedRecord.safetyStock ? 'exception' : 'active'}
               />
               <p style={{ color: '#666', fontSize: 12, marginTop: 8 }}>
-                当前库存：{selectedRecord.quantity} {selectedRecord.unit} | 
-                安全库存：{selectedRecord.safetyStock} {selectedRecord.unit}
+                当前库存：{selectedRecord.quantity} {selectedRecord.unit} | 安全库存：
+                {selectedRecord.safetyStock} {selectedRecord.unit}
               </p>
             </div>
+
+            {selectedRecord.usageRecords && selectedRecord.usageRecords.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <Title level={5}>领用记录</Title>
+                <Table
+                  dataSource={selectedRecord.usageRecords}
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: '使用量', dataIndex: 'quantity', key: 'quantity', width: 80, render: (v) => `${v} ${selectedRecord.unit}` },
+                    { title: '领用人', dataIndex: 'user', key: 'user', width: 100 },
+                    { title: '用途', dataIndex: 'purpose', key: 'purpose' },
+                    {
+                      title: '关联样品',
+                      key: 'sample',
+                      width: 140,
+                      render: (_, record) => {
+                        const sample = samples.find((s) => s.id === record.sampleId);
+                        return sample ? sample.sid : '-';
+                      },
+                    },
+                    { title: '使用时间', dataIndex: 'usedAt', key: 'usedAt', width: 160 },
+                  ]}
+                />
+              </div>
+            )}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title="试剂领用"
+        open={useModalOpen}
+        onCancel={() => setUseModalOpen(false)}
+        footer={null}
+        width={500}
+        maskClosable={false}
+      >
+        {selectedRecord && (
+          <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+            <p style={{ margin: 0 }}>
+              <b>{selectedRecord.name}</b>（批号：{selectedRecord.batchNo}）
+            </p>
+            <p style={{ margin: 0, color: '#666' }}>
+              当前库存：{selectedRecord.quantity} {selectedRecord.unit}
+            </p>
+          </div>
+        )}
+        <Form form={form} layout="vertical" onFinish={handleUseSubmit}>
+          <Form.Item
+            name="quantity"
+            label="领用数量"
+            rules={[{ required: true, message: '请输入领用数量' }]}
+          >
+            <InputNumber min={1} style={{ width: '100%' }} placeholder="请输入领用数量" />
+          </Form.Item>
+          <Form.Item
+            name="sampleId"
+            label="关联样品"
+          >
+            <Select placeholder="请选择关联样品（可选）" allowClear>
+              {samples.map((s) => (
+                <Option key={s.id} value={s.id}>
+                  {s.sid} - {s.name}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="purpose"
+            label="用途说明"
+            rules={[{ required: true, message: '请输入用途' }]}
+          >
+            <TextArea rows={3} placeholder="请输入领用用途..." />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">
+                确认领用
+              </Button>
+              <Button onClick={() => setUseModalOpen(false)}>取消</Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );
