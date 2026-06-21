@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card,
   Table,
@@ -17,6 +17,8 @@ import {
   List,
   Avatar,
   Divider,
+  Alert,
+  DatePicker,
 } from 'antd';
 import {
   SearchOutlined,
@@ -30,13 +32,18 @@ import {
   ThunderboltOutlined,
   TeamOutlined,
   ToolOutlined,
+  DeleteOutlined,
+  RollbackOutlined,
+  SaveOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { Sample, SampleStatus, TestItem, User, Equipment } from '../../types';
+import { Sample, SampleStatus, TestItem, User, Equipment, SampleDisposalRecord } from '../../types';
 import { QRCodeSVG } from 'qrcode.react';
+import dayjs from 'dayjs';
 
 const { Option } = Select;
+const { TextArea } = Input;
 
 const statusMap: Record<SampleStatus, { color: string; text: string }> = {
   pending: { color: 'default', text: '待检测' },
@@ -59,6 +66,7 @@ const SampleList = () => {
   const samples = useStore((state) => state.samples);
   const addTasks = useStore((state) => state.addTasks);
   const updateSampleStatus = useStore((state) => state.updateSampleStatus);
+  const addSampleDisposal = useStore((state) => state.addSampleDisposal);
   const users = useStore((state) => state.users);
   const equipments = useStore((state) => state.equipments);
   const tasks = useStore((state) => state.tasks);
@@ -68,7 +76,10 @@ const SampleList = () => {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [qrcodeModalOpen, setQrcodeModalOpen] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [disposalModalOpen, setDisposalModalOpen] = useState(false);
+  const [disposalType, setDisposalType] = useState<'retain' | 'destroy' | 'return' | 'extend'>('retain');
   const [assignForm] = Form.useForm();
+  const [disposalForm] = Form.useForm();
   const [taskAssigns, setTaskAssigns] = useState<TaskAssignItem[]>([]);
 
   const availableEquipments = equipments.filter(
@@ -76,6 +87,50 @@ const SampleList = () => {
   );
 
   const testers = users.filter((u) => ['tester', 'reviewer'].includes(u.role));
+
+  const expiringSamples = useMemo(() => {
+    const now = dayjs();
+    return samples.filter((s) => {
+      if (s.status !== 'retained' && s.status !== 'completed') return false;
+      const expire = dayjs(s.expireTime);
+      return expire.diff(now, 'day') <= 7;
+    });
+  }, [samples]);
+
+  const getSampleTaskStatus = (sampleId: string) => {
+    const sampleTasks = tasks.filter((t) => t.sampleId === sampleId);
+    if (sampleTasks.length === 0) return 'no_task';
+    const allCompleted = sampleTasks.every((t) => t.status === 'completed');
+    if (allCompleted) return 'all_completed';
+    return 'in_progress';
+  };
+
+  const handleDisposal = (record: Sample, type: 'retain' | 'destroy' | 'return' | 'extend') => {
+    setSelectedRecord(record);
+    setDisposalType(type);
+    disposalForm.resetFields();
+    setDisposalModalOpen(true);
+  };
+
+  const handleDisposalSubmit = (values: any) => {
+    if (!selectedRecord) return;
+    const disposalData: any = {
+      type: disposalType,
+      remark: values.remark || '',
+    };
+    if (disposalType === 'extend' && values.newExpireTime) {
+      disposalData.newExpireTime = values.newExpireTime.format('YYYY-MM-DD');
+    }
+    addSampleDisposal(selectedRecord.id, disposalData);
+    const typeText = {
+      retain: '留样登记',
+      destroy: '销毁登记',
+      return: '退回登记',
+      extend: '留样延期',
+    }[disposalType];
+    message.success(`${typeText}成功`);
+    setDisposalModalOpen(false);
+  };
 
   const columns: ColumnsType<Sample> = [
     {
@@ -157,12 +212,15 @@ const SampleList = () => {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 280,
       fixed: 'right',
       render: (_, record) => {
         const relatedTasks = tasks.filter((t) => t.sampleId === record.id);
+        const allCompleted = relatedTasks.length > 0 && relatedTasks.every((t) => t.status === 'completed');
+        const isExpiring = expiringSamples.some((s) => s.id === record.id);
+        
         return (
-          <Space size="small">
+          <Space size="small" wrap>
             <Button
               type="link"
               size="small"
@@ -189,8 +247,63 @@ const SampleList = () => {
                 分样分配
               </Button>
             )}
-            {record.status === 'in_testing' && (
-              <Tag color="blue">{relatedTasks.length} 个任务</Tag>
+            {record.status === 'in_testing' && allCompleted && (
+              <Tag color="success">检测已完成</Tag>
+            )}
+            {(record.status === 'completed' || record.status === 'in_testing') && allCompleted && (
+              <Button
+                type="link"
+                size="small"
+                icon={<SaveOutlined />}
+                onClick={() => {
+                  updateSampleStatus(record.id, 'completed');
+                  message.success('样品状态已更新为已完成');
+                }}
+              >
+                确认完成
+              </Button>
+            )}
+            {record.status === 'completed' && (
+              <>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<SaveOutlined />}
+                  onClick={() => handleDisposal(record, 'retain')}
+                >
+                  留样
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => handleDisposal(record, 'destroy')}
+                >
+                  销毁
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<RollbackOutlined />}
+                  onClick={() => handleDisposal(record, 'return')}
+                >
+                  退回
+                </Button>
+              </>
+            )}
+            {record.status === 'retained' && isExpiring && (
+              <Tag color="warning">即将到期</Tag>
+            )}
+            {record.status === 'retained' && (
+              <Button
+                type="link"
+                size="small"
+                icon={<ClockCircleOutlined />}
+                onClick={() => handleDisposal(record, 'extend')}
+              >
+                延期
+              </Button>
             )}
           </Space>
         );
@@ -334,7 +447,7 @@ const SampleList = () => {
               <Card size="small" className="stat-mini">
                 <Statistic
                   title="留样到期"
-                  value={2}
+                  value={expiringSamples.length}
                   prefix={<ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />}
                   valueStyle={{ fontSize: 20, color: '#ff4d4f' }}
                 />
@@ -397,6 +510,9 @@ const SampleList = () => {
                   <Tag color={statusMap[selectedRecord.status].color}>
                     {statusMap[selectedRecord.status].text}
                   </Tag>
+                  {expiringSamples.some((s) => s.id === selectedRecord.id) && (
+                    <Tag color="warning">即将到期</Tag>
+                  )}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="样品名称">{selectedRecord.name}</Descriptions.Item>
@@ -414,6 +530,17 @@ const SampleList = () => {
               <Descriptions.Item label="留样天数">{selectedRecord.retainDays} 天</Descriptions.Item>
               <Descriptions.Item label="留样到期">{selectedRecord.expireTime}</Descriptions.Item>
             </Descriptions>
+
+            {expiringSamples.some((s) => s.id === selectedRecord.id) && (
+              <Alert
+                message="留样即将到期"
+                description={`该样品留样将于 ${selectedRecord.expireTime} 到期，请及时处理`}
+                type="warning"
+                showIcon
+                style={{ marginTop: 16 }}
+              />
+            )}
+
             <div style={{ marginTop: 16 }}>
               <h4>检测项目</h4>
               {selectedRecord.testItems.map((item, index) => (
@@ -446,6 +573,50 @@ const SampleList = () => {
                               {item.status}
                             </Tag></span>
                           </Space>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              </div>
+            )}
+
+            {selectedRecord.disposalRecords && selectedRecord.disposalRecords.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <Divider />
+                <h4>处置记录</h4>
+                <List
+                  size="small"
+                  dataSource={selectedRecord.disposalRecords.slice().reverse()}
+                  renderItem={(record: SampleDisposalRecord) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        avatar={
+                          <Tag color={
+                            record.type === 'retain' ? 'blue' :
+                            record.type === 'destroy' ? 'default' :
+                            record.type === 'return' ? 'warning' : 'processing'
+                          } style={{ marginRight: 12 }}>
+                            {record.type === 'retain' ? '留样' :
+                             record.type === 'destroy' ? '销毁' :
+                             record.type === 'return' ? '退回' : '延期'}
+                          </Tag>
+                        }
+                        title={
+                          <Space>
+                            <span style={{ fontWeight: 600 }}>
+                              {record.type === 'retain' ? '留样登记' :
+                               record.type === 'destroy' ? '样品销毁' :
+                               record.type === 'return' ? '样品退回' : '留样延期'}
+                            </span>
+                          </Space>
+                        }
+                        description={
+                          <span style={{ color: '#999' }}>
+                            操作人：{record.operator} | 时间：{record.operateTime}
+                            {record.remark && ` | 备注：${record.remark}`}
+                            {record.newExpireTime && ` | 新到期时间：${record.newExpireTime}`}
+                          </span>
                         }
                       />
                     </List.Item>
@@ -544,6 +715,63 @@ const SampleList = () => {
             <p style={{ color: '#666', fontSize: 12, marginTop: 8 }}>
               共 {taskAssigns.length} 个检测项目，将生成对应数量的检测任务
             </p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={
+          disposalType === 'retain' ? '留样登记' :
+          disposalType === 'destroy' ? '样品销毁' :
+          disposalType === 'return' ? '样品退回' : '留样延期'
+        }
+        open={disposalModalOpen}
+        onCancel={() => setDisposalModalOpen(false)}
+        footer={null}
+        width={500}
+        maskClosable={false}
+      >
+        {selectedRecord && (
+          <div>
+            <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+              <Space>
+                <span style={{ fontWeight: 600 }}>{selectedRecord.sid}</span>
+                <span>{selectedRecord.name}</span>
+              </Space>
+            </div>
+            <Form form={disposalForm} layout="vertical" onFinish={handleDisposalSubmit}>
+              {disposalType === 'extend' && (
+                <Form.Item
+                  name="newExpireTime"
+                  label="新的到期时间"
+                  rules={[{ required: true, message: '请选择新的到期时间' }]}
+                >
+                  <DatePicker style={{ width: '100%' }} placeholder="请选择到期时间" />
+                </Form.Item>
+              )}
+              <Form.Item name="remark" label="备注说明">
+                <TextArea 
+                  rows={4} 
+                  placeholder={
+                    disposalType === 'retain' ? '请填写留样备注...' :
+                    disposalType === 'destroy' ? '请填写销毁原因及方式...' :
+                    disposalType === 'return' ? '请填写退回原因...' :
+                    '请填写延期原因...'
+                  } 
+                />
+              </Form.Item>
+              <Form.Item>
+                <Space>
+                  <Button type="primary" htmlType="submit">
+                    确认
+                    {disposalType === 'retain' ? '留样' :
+                     disposalType === 'destroy' ? '销毁' :
+                     disposalType === 'return' ? '退回' : '延期'}
+                  </Button>
+                  <Button onClick={() => setDisposalModalOpen(false)}>取消</Button>
+                </Space>
+              </Form.Item>
+            </Form>
           </div>
         )}
       </Modal>

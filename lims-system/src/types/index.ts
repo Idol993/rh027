@@ -33,6 +33,28 @@ export interface ReportReturnRecord {
   returnTime: string;
 }
 
+export interface ReportRevisionRecord {
+  id: string;
+  reportId: string;
+  revisionNo: number;
+  content: string;
+  modifiedBy: string;
+  modifiedById: string;
+  modifiedAt: string;
+  relatedReturnId?: string;
+}
+
+export interface SampleDisposalRecord {
+  id: string;
+  sampleId: string;
+  type: 'retain' | 'destroy' | 'return' | 'extend';
+  operator: string;
+  operatorId: string;
+  operateTime: string;
+  remark?: string;
+  newExpireTime?: string;
+}
+
 export interface CalibrationRecord {
   id: string;
   equipmentId: string;
@@ -117,6 +139,7 @@ export interface Sample {
   retainDays: number;
   expireTime: string;
   testItems: TestItem[];
+  disposalRecords?: SampleDisposalRecord[];
 }
 
 export interface TestTask {
@@ -174,6 +197,7 @@ export interface Report {
   sampleIds: string[];
   status: ReportStatus;
   conclusion: string;
+  remarks?: string;
   createdAt: string;
   createdBy: string;
   level1Sign?: {
@@ -197,6 +221,8 @@ export interface Report {
   issuedAt?: string;
   items: ReportItem[];
   returnRecords?: ReportReturnRecord[];
+  revisionRecords?: ReportRevisionRecord[];
+  currentReturnLevel?: 'level1' | 'level2' | 'level3';
 }
 
 export interface ReportItem {

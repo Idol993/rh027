@@ -33,10 +33,12 @@ import {
   LockOutlined,
   RollbackOutlined,
   ReconciliationOutlined,
+  EditOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { Report, ReportStatus, ReportItem, EntrustOrder, TestTask, ReportReturnRecord } from '../../types';
+import { Report, ReportStatus, ReportItem, EntrustOrder, TestTask, ReportReturnRecord, ReportRevisionRecord } from '../../types';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -58,6 +60,8 @@ const ReportList = () => {
   const addReport = useStore((state) => state.addReport);
   const updateReport = useStore((state) => state.updateReport);
   const returnReport = useStore((state) => state.returnReport);
+  const reviseReport = useStore((state) => state.reviseReport);
+  const resubmitReport = useStore((state) => state.resubmitReport);
   const orders = useStore((state) => state.orders);
   const tasks = useStore((state) => state.tasks);
   const samples = useStore((state) => state.samples);
@@ -71,10 +75,12 @@ const ReportList = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [returnLevel, setReturnLevel] = useState<'level1' | 'level2' | 'level3'>('level1');
+  const [reviseModalOpen, setReviseModalOpen] = useState(false);
   const [selectedEntrustId, setSelectedEntrustId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [createForm] = Form.useForm();
   const [returnForm] = Form.useForm();
+  const [reviseForm] = Form.useForm();
 
   const completedTasks = tasks.filter((t) => t.status === 'completed' && t.result);
 
@@ -114,8 +120,74 @@ const ReportList = () => {
   };
 
   const handleResubmit = (record: Report) => {
-    updateReport(record.id, { status: 'draft' });
-    message.success('报告已重新提交，可继续编辑审核');
+    resubmitReport(record.id);
+    const levelText = record.currentReturnLevel === 'level3' ? '二级审核' :
+                      record.currentReturnLevel === 'level2' ? '一级审核' : '草稿';
+    message.success(`报告已重新提交，当前状态：${levelText}`);
+  };
+
+  const handleRevise = (record: Report) => {
+    setSelectedRecord(record);
+    reviseForm.setFieldsValue({
+      conclusion: record.conclusion,
+      remarks: record.remarks || '',
+    });
+    setReviseModalOpen(true);
+  };
+
+  const handleRefreshItems = () => {
+    if (!selectedRecord) return;
+    const order = orders.find((o) => o.id === selectedRecord.entrustId);
+    if (!order) return;
+
+    const relatedSamples = samples.filter((s) => s.entrustId === order.id);
+    const allRelatedTasks = tasks.filter(
+      (t) => relatedSamples.some((s) => s.id === t.sampleId)
+    );
+    const completedTasks = allRelatedTasks.filter(
+      (t) => t.status === 'completed' && t.result
+    );
+
+    const sampleTasks: Record<string, TestTask[]> = {};
+    completedTasks.forEach((task) => {
+      if (!sampleTasks[task.sampleId]) {
+        sampleTasks[task.sampleId] = [];
+      }
+      sampleTasks[task.sampleId].push(task);
+    });
+
+    const reportItems: ReportItem[] = [];
+    Object.entries(sampleTasks).forEach(([sampleId, tasks]) => {
+      const sample = relatedSamples.find((s) => s.id === sampleId);
+      tasks.forEach((task) => {
+        reportItems.push({
+          sampleSid: task.sampleSid,
+          sampleName: sample?.name || task.sampleName,
+          testItem: task.testItem.name,
+          standard: task.testItem.standard,
+          limit: task.testItem.limit,
+          result: String(task.result?.value || ''),
+          unit: task.testItem.unit,
+          conclusion: task.result?.result || 'pending',
+        });
+      });
+    });
+
+    updateReport(selectedRecord.id, { items: reportItems });
+    setSelectedRecord({ ...selectedRecord, items: reportItems });
+    message.success('检测结果明细已从最新完成的任务中刷新');
+  };
+
+  const handleReviseSubmit = (values: any) => {
+    if (!selectedRecord) return;
+    const lastReturn = selectedRecord.returnRecords?.[selectedRecord.returnRecords.length - 1];
+    const content = `修改报告结论和备注：${values.conclusion.substring(0, 50)}...`;
+    reviseReport(selectedRecord.id, {
+      conclusion: values.conclusion,
+      remarks: values.remarks,
+    }, content, lastReturn?.id);
+    message.success('报告修订成功');
+    setReviseModalOpen(false);
   };
 
   const handleSignSubmit = (values: any) => {
@@ -364,10 +436,10 @@ const ReportList = () => {
     {
       title: '操作',
       key: 'action',
-      width: 280,
+      width: 320,
       fixed: 'right',
       render: (_, record) => (
-        <Space size="small">
+        <Space size="small" wrap>
           <Button
             type="link"
             size="small"
@@ -437,14 +509,24 @@ const ReportList = () => {
             </>
           )}
           {record.status === 'returned' && (currentUser?.role === 'tester' || currentUser?.role === 'reviewer') && (
-            <Button
-              type="link"
-              size="small"
-              icon={<ReconciliationOutlined />}
-              onClick={() => handleResubmit(record)}
-            >
-              重新提交
-            </Button>
+            <>
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleRevise(record)}
+              >
+                修订
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                icon={<ReconciliationOutlined />}
+                onClick={() => handleResubmit(record)}
+              >
+                重新提交
+              </Button>
+            </>
           )}
           {record.status === 'issued' && (
             <>
@@ -719,6 +801,38 @@ const ReportList = () => {
               ]}
             />
 
+            {selectedRecord.revisionRecords && selectedRecord.revisionRecords.length > 0 && (
+              <>
+                <Divider />
+                <Title level={5}>修订记录</Title>
+                <List
+                  size="small"
+                  dataSource={selectedRecord.revisionRecords.slice().reverse()}
+                  renderItem={(record: ReportRevisionRecord) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        avatar={
+                          <Tag color="blue" style={{ marginRight: 12 }}>
+                            第{record.revisionNo}次
+                          </Tag>
+                        }
+                        title={
+                          <Space>
+                            <span style={{ fontWeight: 600 }}>{record.content}</span>
+                          </Space>
+                        }
+                        description={
+                          <span style={{ color: '#999' }}>
+                            修改人：{record.modifiedBy} | 时间：{record.modifiedAt}
+                          </span>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              </>
+            )}
+
             {selectedRecord.returnRecords && selectedRecord.returnRecords.length > 0 && (
               <>
                 <Divider />
@@ -978,6 +1092,101 @@ const ReportList = () => {
       </Modal>
 
       <Modal
+        title="报告修订"
+        open={reviseModalOpen}
+        onCancel={() => setReviseModalOpen(false)}
+        footer={null}
+        width={650}
+        maskClosable={false}
+      >
+        {selectedRecord && (
+          <div>
+            <div style={{ marginBottom: 16, padding: 12, background: '#e6f7ff', borderRadius: 4 }}>
+              <Space wrap>
+                <span style={{ fontWeight: 600 }}>{selectedRecord.reportNo}</span>
+                <Tag color="warning">已退回</Tag>
+                <span style={{ color: '#666', fontSize: 12 }}>
+                  第 {(selectedRecord.revisionRecords?.length || 0) + 1} 次修订
+                </span>
+              </Space>
+            </div>
+
+            {selectedRecord.returnRecords && selectedRecord.returnRecords.length > 0 && (
+              <Alert
+                message="最新退回意见"
+                description={selectedRecord.returnRecords[selectedRecord.returnRecords.length - 1].opinion}
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            <Form form={reviseForm} layout="vertical" onFinish={handleReviseSubmit}>
+              <Form.Item
+                name="conclusion"
+                label="报告结论"
+                rules={[{ required: true, message: '请填写报告结论' }]}
+              >
+                <TextArea rows={3} placeholder="请填写报告结论..." />
+              </Form.Item>
+
+              <Form.Item name="remarks" label="备注说明">
+                <TextArea rows={3} placeholder="可填写其他需要说明的内容..." />
+              </Form.Item>
+
+              <div style={{ marginBottom: 16 }}>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={handleRefreshItems}
+                >
+                  刷新检测明细
+                </Button>
+                <span style={{ marginLeft: 8, color: '#999', fontSize: 12 }}>
+                  从已完成的检测任务中重新获取最新结果
+                </span>
+              </div>
+
+              <div style={{ marginBottom: 12, fontSize: 13, color: '#666' }}>
+                检测结果明细（共 {selectedRecord.items?.length || 0} 项）：
+              </div>
+              <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #e8e8e8', borderRadius: 4 }}>
+                <Table
+                  dataSource={selectedRecord.items || []}
+                  rowKey={(record, idx) => `revise-${record.sampleSid}-${record.testItem}-${idx}`}
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: '样品', dataIndex: 'sampleSid', key: 'sampleSid', width: 120 },
+                    { title: '检测项目', dataIndex: 'testItem', key: 'testItem', width: 100 },
+                    { title: '结果', key: 'result', width: 100, render: (_, r) => `${r.result} ${r.unit}` },
+                    {
+                      title: '判定',
+                      key: 'judge',
+                      width: 70,
+                      render: (_, r) => (
+                        <Tag color={r.conclusion === 'qualified' ? 'success' : 'error'}>
+                          {r.conclusion === 'qualified' ? '合格' : '不合格'}
+                        </Tag>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+
+              <Form.Item style={{ marginTop: 20 }}>
+                <Space>
+                  <Button type="primary" htmlType="submit">
+                    保存修订
+                  </Button>
+                  <Button onClick={() => setReviseModalOpen(false)}>取消</Button>
+                </Space>
+              </Form.Item>
+            </Form>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
         title="报告预览"
         open={previewModalOpen}
         onCancel={() => setPreviewModalOpen(false)}
@@ -1020,28 +1229,60 @@ const ReportList = () => {
             <div style={{ fontWeight: 600, margin: '16px 0 12px 0', fontSize: 15, borderLeft: '3px solid #1890ff', paddingLeft: 8 }}>
               检测结果
             </div>
-            <Table
-              dataSource={selectedRecord.items || []}
-              rowKey={(record, idx) => `preview-${record.sampleSid}-${record.testItem}-${idx}`}
-              size="small"
-              pagination={false}
-              bordered
-              columns={[
-                { title: '序号', key: 'idx', width: 50, render: (_, __, idx) => idx + 1 },
-                { title: '样品编号', dataIndex: 'sampleSid', key: 'sampleSid' },
-                { title: '检测项目', dataIndex: 'testItem', key: 'testItem' },
-                { title: '检测标准', dataIndex: 'standard', key: 'standard' },
-                { title: '限值要求', dataIndex: 'limit', key: 'limit' },
-                { title: '检测结果', key: 'result', render: (_, r) => `${r.result} ${r.unit}` },
-                {
-                  title: '单项判定',
-                  key: 'judge',
-                  width: 80,
-                  render: (_, r) =>
-                    r.conclusion === 'qualified' ? '合格' : '不合格',
-                },
-              ]}
-            />
+
+            {(() => {
+              const sampleGroups: Record<string, ReportItem[]> = {};
+              (selectedRecord.items || []).forEach((item) => {
+                if (!sampleGroups[item.sampleSid]) {
+                  sampleGroups[item.sampleSid] = [];
+                }
+                sampleGroups[item.sampleSid].push(item);
+              });
+              
+              return Object.entries(sampleGroups).map(([sampleSid, items]) => {
+                const sampleName = items[0]?.sampleName || '';
+                return (
+                  <div key={sampleSid} style={{ marginBottom: 16 }}>
+                    <div style={{ 
+                      marginBottom: 8, 
+                      padding: '8px 12px', 
+                      background: '#f0f7ff', 
+                      borderRadius: 4,
+                      fontWeight: 600,
+                      fontSize: 14,
+                      borderLeft: '3px solid #1890ff',
+                    }}>
+                      <Space>
+                        <span>样品编号：{sampleSid}</span>
+                        <span style={{ color: '#666', fontWeight: 400 }}>|</span>
+                        <span style={{ color: '#666', fontWeight: 400 }}>样品名称：{sampleName}</span>
+                      </Space>
+                    </div>
+                    <Table
+                      dataSource={items}
+                      rowKey={(record, idx) => `preview-${sampleSid}-${record.testItem}-${idx}`}
+                      size="small"
+                      pagination={false}
+                      bordered
+                      columns={[
+                        { title: '序号', key: 'idx', width: 50, render: (_, __, idx) => idx + 1 },
+                        { title: '检测项目', dataIndex: 'testItem', key: 'testItem', width: 100 },
+                        { title: '检测标准', dataIndex: 'standard', key: 'standard' },
+                        { title: '限值要求', dataIndex: 'limit', key: 'limit', width: 100 },
+                        { title: '检测结果', key: 'result', width: 100, render: (_, r) => `${r.result} ${r.unit}` },
+                        {
+                          title: '单项判定',
+                          key: 'judge',
+                          width: 80,
+                          render: (_, r) =>
+                            r.conclusion === 'qualified' ? '合格' : '不合格',
+                        },
+                      ]}
+                    />
+                  </div>
+                );
+              });
+            })()}
 
             <div style={{ marginTop: 16, padding: 12, background: '#f6ffed', borderRadius: 4 }}>
               <p style={{ margin: 0, fontWeight: 600, color: '#389e0d' }}>

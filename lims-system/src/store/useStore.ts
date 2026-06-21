@@ -7,7 +7,9 @@ import {
   TestTask,
   Report,
   ReportReturnRecord,
+  ReportRevisionRecord,
   ReportStatus,
+  SampleDisposalRecord,
   Reagent,
   ReagentUsage,
   Equipment,
@@ -56,6 +58,9 @@ interface AppState {
   updateReportStatus: (id: string, status: Report['status'], signData?: any) => void;
   updateReport: (id: string, report: Partial<Report>) => void;
   returnReport: (id: string, level: 'level1' | 'level2' | 'level3', opinion: string) => void;
+  reviseReport: (id: string, data: Partial<Report>, content: string, relatedReturnId?: string) => void;
+  resubmitReport: (id: string) => void;
+  addSampleDisposal: (sampleId: string, record: Omit<SampleDisposalRecord, 'id' | 'sampleId' | 'operator' | 'operatorId' | 'operateTime'>) => void;
   updateReagent: (id: string, reagent: Partial<Reagent>) => void;
   addReagentUsage: (id: string, usage: Omit<ReagentUsage, 'id'>) => void;
   updateEquipment: (id: string, equipment: Partial<Equipment>) => void;
@@ -120,9 +125,13 @@ export const useStore = create<AppState>()(
               ? {
                   ...o,
                   status,
-                  reviewOpinion: opinion,
-                  reviewedBy: state.currentUser?.name,
-                  reviewedAt: new Date().toLocaleString('zh-CN'),
+                  ...(status === 'approved' || status === 'rejected'
+                    ? {
+                        reviewOpinion: opinion,
+                        reviewedBy: state.currentUser?.name,
+                        reviewedAt: new Date().toLocaleString('zh-CN'),
+                      }
+                    : {}),
                 }
               : o
           ),
@@ -245,12 +254,11 @@ export const useStore = create<AppState>()(
             reports: state.reports.map((r) => {
               if (r.id !== id) return r;
               const returnRecords = [...(r.returnRecords || []), newReturnRecord];
-              let prevStatus = r.status;
-              let newStatus: ReportStatus = 'returned';
               let updated: Report = {
                 ...r,
-                status: newStatus,
+                status: 'returned',
                 returnRecords,
+                currentReturnLevel: level,
               };
               if (level === 'level1') {
                 delete updated.level1Sign;
@@ -258,6 +266,89 @@ export const useStore = create<AppState>()(
                 delete updated.level2Sign;
               } else if (level === 'level3') {
                 delete updated.level3Sign;
+              }
+              return updated;
+            }),
+          };
+        });
+      },
+
+      reviseReport: (id, data, content, relatedReturnId) => {
+        set((state) => {
+          const report = state.reports.find((r) => r.id === id);
+          if (!report) return state;
+          const revisionNo = (report.revisionRecords?.length || 0) + 1;
+          const newRevision: ReportRevisionRecord = {
+            id: `REV_${Date.now()}`,
+            reportId: id,
+            revisionNo,
+            content,
+            modifiedBy: state.currentUser?.name || '',
+            modifiedById: state.currentUser?.id || '',
+            modifiedAt: new Date().toLocaleString('zh-CN'),
+            relatedReturnId,
+          };
+          return {
+            reports: state.reports.map((r) =>
+              r.id === id
+                ? {
+                    ...r,
+                    ...data,
+                    revisionRecords: [...(r.revisionRecords || []), newRevision],
+                  }
+                : r
+            ),
+          };
+        });
+      },
+
+      resubmitReport: (id) => {
+        set((state) => {
+          const report = state.reports.find((r) => r.id === id);
+          if (!report) return state;
+          let newStatus: ReportStatus = 'draft';
+          const returnLevel = report.currentReturnLevel;
+          if (returnLevel === 'level3') {
+            newStatus = 'level2_signed';
+          } else if (returnLevel === 'level2') {
+            newStatus = 'level1_signed';
+          } else {
+            newStatus = 'draft';
+          }
+          return {
+            reports: state.reports.map((r) =>
+              r.id === id ? { ...r, status: newStatus, currentReturnLevel: undefined } : r
+            ),
+          };
+        });
+      },
+
+      addSampleDisposal: (sampleId, record) => {
+        set((state) => {
+          const newRecord: SampleDisposalRecord = {
+            ...record,
+            id: `D${Date.now()}`,
+            sampleId,
+            operator: state.currentUser?.name || '',
+            operatorId: state.currentUser?.id || '',
+            operateTime: new Date().toLocaleString('zh-CN'),
+          };
+          return {
+            samples: state.samples.map((s) => {
+              if (s.id !== sampleId) return s;
+              let updated: Sample = {
+                ...s,
+                disposalRecords: [...(s.disposalRecords || []), newRecord],
+              };
+              if (record.type === 'retain') {
+                updated.status = 'retained';
+              } else if (record.type === 'destroy') {
+                updated.status = 'destroyed';
+              } else if (record.type === 'return') {
+                updated.status = 'returned';
+              }
+              if (record.newExpireTime) {
+                updated.expireTime = record.newExpireTime;
               }
               return updated;
             }),

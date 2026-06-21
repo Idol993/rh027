@@ -127,6 +127,14 @@ const EntrustList = () => {
       render: (text) => text || '-',
     },
     {
+      title: '评审意见',
+      dataIndex: 'reviewOpinion',
+      key: 'reviewOpinion',
+      width: 180,
+      ellipsis: true,
+      render: (text) => text || '-',
+    },
+    {
       title: '评审时间',
       dataIndex: 'reviewedAt',
       key: 'reviewedAt',
