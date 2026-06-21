@@ -6,6 +6,8 @@ import {
   Sample,
   TestTask,
   Report,
+  ReportReturnRecord,
+  ReportStatus,
   Reagent,
   ReagentUsage,
   Equipment,
@@ -48,9 +50,12 @@ interface AppState {
   updateSampleStatus: (id: string, status: Sample['status']) => void;
   updateTask: (id: string, task: Partial<TestTask>) => void;
   updateTaskStatus: (id: string, status: TestTask['status']) => void;
+  addTask: (task: Omit<TestTask, 'id' | 'taskNo'>) => void;
+  addTasks: (tasks: Omit<TestTask, 'id' | 'taskNo'>[]) => void;
   addReport: (report: Omit<Report, 'id' | 'reportNo'>) => void;
   updateReportStatus: (id: string, status: Report['status'], signData?: any) => void;
   updateReport: (id: string, report: Partial<Report>) => void;
+  returnReport: (id: string, level: 'level1' | 'level2' | 'level3', opinion: string) => void;
   updateReagent: (id: string, reagent: Partial<Reagent>) => void;
   addReagentUsage: (id: string, usage: Omit<ReagentUsage, 'id'>) => void;
   updateEquipment: (id: string, equipment: Partial<Equipment>) => void;
@@ -154,6 +159,27 @@ export const useStore = create<AppState>()(
         }));
       },
 
+      addTask: (task) => {
+        const state = get();
+        const newTask: TestTask = {
+          ...task,
+          id: `T${Date.now()}`,
+          taskNo: `RW${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(state.tasks.length + 1).padStart(4, '0')}`,
+        };
+        set((state) => ({ tasks: [...state.tasks, newTask] }));
+      },
+
+      addTasks: (taskList) => {
+        const state = get();
+        const now = new Date();
+        const newTasks = taskList.map((task, idx) => ({
+          ...task,
+          id: `T${Date.now()}_${idx}`,
+          taskNo: `RW${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(state.tasks.length + idx + 1).padStart(4, '0')}`,
+        }));
+        set((state) => ({ tasks: [...state.tasks, ...newTasks] }));
+      },
+
       addReport: (report) => {
         const newReport: Report = {
           ...report,
@@ -202,6 +228,41 @@ export const useStore = create<AppState>()(
             return updated;
           }),
         }));
+      },
+
+      returnReport: (id, level, opinion) => {
+        set((state) => {
+          const newReturnRecord: ReportReturnRecord = {
+            id: `RET_${Date.now()}`,
+            reportId: id,
+            level,
+            opinion,
+            operator: state.currentUser?.name || '',
+            operatorId: state.currentUser?.id || '',
+            returnTime: new Date().toLocaleString('zh-CN'),
+          };
+          return {
+            reports: state.reports.map((r) => {
+              if (r.id !== id) return r;
+              const returnRecords = [...(r.returnRecords || []), newReturnRecord];
+              let prevStatus = r.status;
+              let newStatus: ReportStatus = 'returned';
+              let updated: Report = {
+                ...r,
+                status: newStatus,
+                returnRecords,
+              };
+              if (level === 'level1') {
+                delete updated.level1Sign;
+              } else if (level === 'level2') {
+                delete updated.level2Sign;
+              } else if (level === 'level3') {
+                delete updated.level3Sign;
+              }
+              return updated;
+            }),
+          };
+        });
       },
 
       updateReagent: (id, reagent) => {

@@ -8,11 +8,15 @@ import {
   Input,
   Select,
   Modal,
+  Form,
   message,
   Descriptions,
   Row,
   Col,
   Statistic,
+  List,
+  Avatar,
+  Divider,
 } from 'antd';
 import {
   SearchOutlined,
@@ -23,10 +27,13 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   FileDoneOutlined,
+  ThunderboltOutlined,
+  TeamOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { Sample, SampleStatus } from '../../types';
+import { Sample, SampleStatus, TestItem, User, Equipment } from '../../types';
 import { QRCodeSVG } from 'qrcode.react';
 
 const { Option } = Select;
@@ -40,11 +47,35 @@ const statusMap: Record<SampleStatus, { color: string; text: string }> = {
   returned: { color: 'warning', text: '已退回' },
 };
 
+interface TaskAssignItem {
+  testItem: TestItem;
+  testerId: string;
+  testerName: string;
+  equipmentId: string;
+  equipmentName: string;
+}
+
 const SampleList = () => {
   const samples = useStore((state) => state.samples);
+  const addTasks = useStore((state) => state.addTasks);
+  const updateSampleStatus = useStore((state) => state.updateSampleStatus);
+  const users = useStore((state) => state.users);
+  const equipments = useStore((state) => state.equipments);
+  const tasks = useStore((state) => state.tasks);
+  const currentUser = useStore((state) => state.currentUser);
+
   const [selectedRecord, setSelectedRecord] = useState<Sample | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [qrcodeModalOpen, setQrcodeModalOpen] = useState(false);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignForm] = Form.useForm();
+  const [taskAssigns, setTaskAssigns] = useState<TaskAssignItem[]>([]);
+
+  const availableEquipments = equipments.filter(
+    (e) => !['fault', 'faulty', 'maintenance', 'calibration_due', 'overdue'].includes(e.status)
+  );
+
+  const testers = users.filter((u) => ['tester', 'reviewer'].includes(u.role));
 
   const columns: ColumnsType<Sample> = [
     {
@@ -90,6 +121,13 @@ const SampleList = () => {
       width: 140,
     },
     {
+      title: '检测项目数',
+      dataIndex: 'testItems',
+      key: 'testItems',
+      width: 110,
+      render: (items) => items?.length || 0,
+    },
+    {
       title: '存放位置',
       dataIndex: 'storageLocation',
       key: 'storageLocation',
@@ -119,28 +157,44 @@ const SampleList = () => {
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 220,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleView(record)}
-          >
-            详情
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<QrcodeOutlined />}
-            onClick={() => handleQrcode(record)}
-          >
-            二维码
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const relatedTasks = tasks.filter((t) => t.sampleId === record.id);
+        return (
+          <Space size="small">
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => handleView(record)}
+            >
+              详情
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<QrcodeOutlined />}
+              onClick={() => handleQrcode(record)}
+            >
+              二维码
+            </Button>
+            {record.status === 'pending' && (
+              <Button
+                type="link"
+                size="small"
+                icon={<ThunderboltOutlined />}
+                onClick={() => handleAssign(record)}
+              >
+                分样分配
+              </Button>
+            )}
+            {record.status === 'in_testing' && (
+              <Tag color="blue">{relatedTasks.length} 个任务</Tag>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -152,6 +206,73 @@ const SampleList = () => {
   const handleQrcode = (record: Sample) => {
     setSelectedRecord(record);
     setQrcodeModalOpen(true);
+  };
+
+  const handleAssign = (record: Sample) => {
+    if (!record.testItems || record.testItems.length === 0) {
+      message.error('该样品没有检测项目，无法分配任务');
+      return;
+    }
+    setSelectedRecord(record);
+    const initialAssigns: TaskAssignItem[] = record.testItems.map((item) => ({
+      testItem: item,
+      testerId: '',
+      testerName: '',
+      equipmentId: '',
+      equipmentName: '',
+    }));
+    setTaskAssigns(initialAssigns);
+    assignForm.resetFields();
+    setAssignModalOpen(true);
+  };
+
+  const handleTesterChange = (index: number, value: string) => {
+    const user = users.find((u) => u.id === value);
+    const newAssigns = [...taskAssigns];
+    newAssigns[index].testerId = value;
+    newAssigns[index].testerName = user?.name || '';
+    setTaskAssigns(newAssigns);
+  };
+
+  const handleEquipmentChange = (index: number, value: string) => {
+    const equip = equipments.find((e) => e.id === value);
+    const newAssigns = [...taskAssigns];
+    newAssigns[index].equipmentId = value;
+    newAssigns[index].equipmentName = equip?.name || '';
+    setTaskAssigns(newAssigns);
+  };
+
+  const handleAssignSubmit = () => {
+    if (!selectedRecord) return;
+
+    const invalid = taskAssigns.find(
+      (t) => !t.testerId || !t.equipmentId
+    );
+    if (invalid) {
+      message.error('请为所有检测项目分配检测员和设备');
+      return;
+    }
+
+    const newTasks = taskAssigns.map((t) => ({
+      sampleId: selectedRecord.id,
+      sampleSid: selectedRecord.sid,
+      sampleName: selectedRecord.name,
+      entrustId: selectedRecord.entrustId,
+      entrustNo: selectedRecord.entrustNo,
+      testItem: t.testItem,
+      status: 'pending' as const,
+      tester: t.testerName,
+      testerId: t.testerId,
+      equipmentId: t.equipmentId,
+      equipmentName: t.equipmentName,
+      department: currentUser?.department || '',
+      assignTime: new Date().toLocaleString('zh-CN'),
+    }));
+
+    addTasks(newTasks);
+    updateSampleStatus(selectedRecord.id, 'in_testing');
+    message.success(`成功生成 ${newTasks.length} 条检测任务，样品已进入检测中状态`);
+    setAssignModalOpen(false);
   };
 
   return (
@@ -249,7 +370,7 @@ const SampleList = () => {
           columns={columns}
           dataSource={samples}
           rowKey="id"
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1500 }}
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Card>
@@ -263,7 +384,7 @@ const SampleList = () => {
             关闭
           </Button>,
         ]}
-        width={700}
+        width={800}
       >
         {selectedRecord && (
           <div>
@@ -284,7 +405,9 @@ const SampleList = () => {
               <Descriptions.Item label="数量">{selectedRecord.quantity}</Descriptions.Item>
               <Descriptions.Item label="外观描述">{selectedRecord.appearance}</Descriptions.Item>
               <Descriptions.Item label="包装方式">{selectedRecord.packaging}</Descriptions.Item>
-              <Descriptions.Item label="关联委托">{selectedRecord.entrustNo}</Descriptions.Item>
+              <Descriptions.Item label="关联委托">
+                <a>{selectedRecord.entrustNo}</a>
+              </Descriptions.Item>
               <Descriptions.Item label="存放位置">{selectedRecord.storageLocation}</Descriptions.Item>
               <Descriptions.Item label="接收人">{selectedRecord.receiver}</Descriptions.Item>
               <Descriptions.Item label="接收时间">{selectedRecord.receiveTime}</Descriptions.Item>
@@ -299,6 +422,128 @@ const SampleList = () => {
                 </Tag>
               ))}
             </div>
+            {selectedRecord.status !== 'pending' && (
+              <div style={{ marginTop: 16 }}>
+                <h4>关联检测任务</h4>
+                <List
+                  size="small"
+                  dataSource={tasks.filter((t) => t.sampleId === selectedRecord.id)}
+                  renderItem={(item) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        avatar={<Avatar icon={<ExperimentOutlined />} />}
+                        title={
+                          <Space>
+                            <span>{item.taskNo}</span>
+                            <Tag color="blue">{item.testItem.name}</Tag>
+                          </Space>
+                        }
+                        description={
+                          <Space split="|">
+                            <span>检测员：{item.tester}</span>
+                            <span>设备：{item.equipmentName}</span>
+                            <span>状态：<Tag color={item.status === 'completed' ? 'success' : item.status === 'in_progress' ? 'processing' : 'default'}>
+                              {item.status}
+                            </Tag></span>
+                          </Space>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title="分样与任务分配"
+        open={assignModalOpen}
+        onCancel={() => setAssignModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setAssignModalOpen(false)}>
+            取消
+          </Button>,
+          <Button key="submit" type="primary" onClick={handleAssignSubmit}>
+            确认分配
+          </Button>,
+        ]}
+        width={900}
+        maskClosable={false}
+      >
+        {selectedRecord && (
+          <div>
+            <div style={{ marginBottom: 16, padding: 12, background: '#f0f7ff', borderRadius: 4 }}>
+              <p style={{ margin: 0, color: '#1890ff', fontWeight: 600 }}>
+                {selectedRecord.sid} - {selectedRecord.name}
+              </p>
+              <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: 12 }}>
+                委托单号：{selectedRecord.entrustNo} | 样品数量：{selectedRecord.quantity}
+              </p>
+            </div>
+
+            <div style={{ fontWeight: 600, margin: '16px 0 12px 0', fontSize: 15, borderLeft: '3px solid #1890ff', paddingLeft: 8 }}>
+              按检测项目分配任务
+            </div>
+
+            {taskAssigns.map((assign, index) => (
+              <Card
+                key={assign.testItem.id}
+                size="small"
+                style={{ marginBottom: 12 }}
+                title={
+                  <Space>
+                    <Tag color="blue">{index + 1}</Tag>
+                    <span style={{ fontWeight: 600 }}>{assign.testItem.name}</span>
+                    <span style={{ color: '#999', fontSize: 12 }}>
+                      标准：{assign.testItem.standard} | 限值：{assign.testItem.limit}
+                    </span>
+                  </Space>
+                }
+              >
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
+                      <TeamOutlined /> 检测员
+                    </div>
+                    <Select
+                      placeholder="请选择检测员"
+                      style={{ width: '100%' }}
+                      value={assign.testerId || undefined}
+                      onChange={(v) => handleTesterChange(index, v)}
+                    >
+                      {testers.map((u) => (
+                        <Option key={u.id} value={u.id}>
+                          {u.name} - {u.department}
+                        </Option>
+                      ))}
+                    </Select>
+                  </Col>
+                  <Col span={12}>
+                    <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
+                      <ToolOutlined /> 检测设备
+                    </div>
+                    <Select
+                      placeholder="请选择设备"
+                      style={{ width: '100%' }}
+                      value={assign.equipmentId || undefined}
+                      onChange={(v) => handleEquipmentChange(index, v)}
+                    >
+                      {availableEquipments.map((e) => (
+                        <Option key={e.id} value={e.id}>
+                          {e.name} - {e.model} ({e.equipmentNo})
+                        </Option>
+                      ))}
+                    </Select>
+                  </Col>
+                </Row>
+              </Card>
+            ))}
+
+            <p style={{ color: '#666', fontSize: 12, marginTop: 8 }}>
+              共 {taskAssigns.length} 个检测项目，将生成对应数量的检测任务
+            </p>
           </div>
         )}
       </Modal>

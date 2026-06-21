@@ -17,11 +17,21 @@ export type EntrustStatus = 'draft' | 'submitted' | 'reviewing' | 'approved' | '
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'reviewing' | 'rejected' | 'abnormal';
 
-export type ReportStatus = 'draft' | 'reviewing' | 'level1_signed' | 'level2_signed' | 'issued' | 'voided';
+export type ReportStatus = 'draft' | 'reviewing' | 'level1_signed' | 'level2_signed' | 'issued' | 'voided' | 'returned';
 
 export type ReagentStatus = 'in_stock' | 'low_stock' | 'expiring' | 'expired' | 'used_up';
 
 export type EquipmentStatus = 'normal' | 'in_use' | 'maintenance' | 'calibrating' | 'calibration_due' | 'overdue' | 'fault' | 'faulty' | 'scrapped';
+
+export interface ReportReturnRecord {
+  id: string;
+  reportId: string;
+  level: 'level1' | 'level2' | 'level3';
+  opinion: string;
+  operator: string;
+  operatorId: string;
+  returnTime: string;
+}
 
 export interface CalibrationRecord {
   id: string;
@@ -115,6 +125,8 @@ export interface TestTask {
   sampleId: string;
   sampleSid: string;
   sampleName: string;
+  entrustId: string;
+  entrustNo: string;
   testItem: TestItem;
   status: TaskStatus;
   tester: string;
@@ -184,6 +196,7 @@ export interface Report {
   };
   issuedAt?: string;
   items: ReportItem[];
+  returnRecords?: ReportReturnRecord[];
 }
 
 export interface ReportItem {

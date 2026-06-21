@@ -27,6 +27,7 @@ import {
   DeleteOutlined,
   FileSearchOutlined,
   SendOutlined,
+  AppstoreAddOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
@@ -52,13 +53,16 @@ const EntrustList = () => {
   const updateOrder = useStore((state) => state.updateOrder);
   const deleteOrder = useStore((state) => state.deleteOrder);
   const updateOrderStatus = useStore((state) => state.updateOrderStatus);
+  const addSample = useStore((state) => state.addSample);
   const clients = useStore((state) => state.clients);
   const currentUser = useStore((state) => state.currentUser);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<EntrustOrder | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [sampleModalOpen, setSampleModalOpen] = useState(false);
   const [form] = Form.useForm();
+  const [sampleForm] = Form.useForm();
 
   const columns: ColumnsType<EntrustOrder> = [
     {
@@ -114,6 +118,20 @@ const EntrustList = () => {
       render: (status: EntrustStatus) => (
         <Tag color={statusMap[status].color}>{statusMap[status].text}</Tag>
       ),
+    },
+    {
+      title: '评审人',
+      dataIndex: 'reviewedBy',
+      key: 'reviewedBy',
+      width: 100,
+      render: (text) => text || '-',
+    },
+    {
+      title: '评审时间',
+      dataIndex: 'reviewedAt',
+      key: 'reviewedAt',
+      width: 160,
+      render: (text) => text || '-',
     },
     {
       title: '创建时间',
@@ -177,6 +195,16 @@ const EntrustList = () => {
               提交评审
             </Button>
           )}
+          {record.status === 'approved' && (
+            <Button
+              type="link"
+              size="small"
+              icon={<AppstoreAddOutlined />}
+              onClick={() => handleCreateSample(record)}
+            >
+              生成样品
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -216,6 +244,53 @@ const EntrustList = () => {
   const handleSendToReview = (id: string) => {
     updateOrderStatus(id, 'reviewing');
     message.success('已进入评审流程');
+  };
+
+  const handleCreateSample = (record: EntrustOrder) => {
+    setSelectedRecord(record);
+    sampleForm.resetFields();
+    sampleForm.setFieldsValue({
+      name: record.sampleName,
+      type: record.sampleType,
+      specModel: record.specModel,
+      quantity: record.quantity,
+      entrustId: record.id,
+      entrustNo: record.orderNo,
+      testItems: record.testItems?.map((t) => t.id) || [],
+    });
+    setSampleModalOpen(true);
+  };
+
+  const handleSampleSubmit = (values: any) => {
+    if (!selectedRecord) return;
+    const selectedItems = mockTestItems.filter((item) =>
+      values.testItems?.includes(item.id)
+    );
+    const now = new Date();
+    const receiveTime = now.toLocaleString('zh-CN');
+    const expireTime = new Date(now.getTime() + (values.retainDays || 30) * 24 * 60 * 60 * 1000).toLocaleString('zh-CN');
+
+    addSample({
+      sid: `YP${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
+      name: values.name,
+      type: values.type,
+      specModel: values.specModel,
+      quantity: values.quantity,
+      appearance: values.appearance || '',
+      packaging: values.packaging || '',
+      status: 'pending',
+      entrustId: selectedRecord.id,
+      entrustNo: selectedRecord.orderNo,
+      storageLocation: values.storageLocation || '',
+      receiveTime,
+      receiver: currentUser?.name || '',
+      retainDays: values.retainDays || 30,
+      expireTime,
+      testItems: selectedItems,
+    });
+
+    message.success('样品登记成功');
+    setSampleModalOpen(false);
   };
 
   const handleSubmit = (values: any) => {
@@ -484,6 +559,128 @@ const EntrustList = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title="样品登记"
+        open={sampleModalOpen}
+        onCancel={() => setSampleModalOpen(false)}
+        footer={null}
+        width={650}
+        maskClosable={false}
+      >
+        <Form form={sampleForm} layout="vertical" onFinish={handleSampleSubmit}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="name"
+                label="样品名称"
+                rules={[{ required: true, message: '请输入样品名称' }]}
+              >
+                <Input placeholder="请输入样品名称" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="type"
+                label="样品类型"
+                rules={[{ required: true, message: '请选择样品类型' }]}
+              >
+                <Select placeholder="请选择样品类型">
+                  <Option value="环境水样">环境水样</Option>
+                  <Option value="废水样">废水样</Option>
+                  <Option value="土壤样">土壤样</Option>
+                  <Option value="食品样">食品样</Option>
+                  <Option value="空气样">空气样</Option>
+                  <Option value="其他">其他</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="specModel"
+                label="规格型号"
+              >
+                <Input placeholder="请输入规格型号" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="quantity"
+                label="样品数量"
+                rules={[{ required: true, message: '请输入数量' }]}
+              >
+                <InputNumber min={1} style={{ width: '100%' }} placeholder="请输入数量" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="appearance"
+                label="外观性状"
+              >
+                <Input placeholder="请输入外观描述" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="packaging"
+                label="包装方式"
+              >
+                <Input placeholder="请输入包装方式" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="storageLocation"
+                label="存放位置"
+              >
+                <Input placeholder="请输入存放位置" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="retainDays"
+                label="留样天数"
+                initialValue={30}
+              >
+                <InputNumber min={1} style={{ width: '100%' }} placeholder="请输入留样天数" />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item
+                name="testItems"
+                label="检测项目"
+                rules={[{ required: true, message: '请选择检测项目' }]}
+              >
+                <Select mode="multiple" placeholder="请选择检测项目">
+                  {mockTestItems.map((item) => (
+                    <Option key={item.id} value={item.id}>
+                      {item.name} - {item.standard}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          {selectedRecord && (
+            <div style={{ marginBottom: 16, padding: 12, background: '#f0f7ff', borderRadius: 4 }}>
+              <p style={{ margin: 0, color: '#1890ff' }}>
+                <b>来源委托单：</b>{selectedRecord.orderNo}
+              </p>
+              <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: 12 }}>
+                客户：{selectedRecord.clientName} | 检测项目数：{selectedRecord.testItems?.length || 0}
+              </p>
+            </div>
+          )}
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">
+                确认登记
+              </Button>
+              <Button onClick={() => setSampleModalOpen(false)}>取消</Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

@@ -252,6 +252,12 @@ const TaskList = () => {
       render: (text) => <a>{text}</a>,
     },
     {
+      title: '委托单号',
+      dataIndex: 'entrustNo',
+      key: 'entrustNo',
+      width: 140,
+    },
+    {
       title: '样品编号',
       dataIndex: 'sampleSid',
       key: 'sampleSid',

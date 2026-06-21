@@ -18,6 +18,8 @@ import {
   Typography,
   Divider,
   Popconfirm,
+  List,
+  Alert,
 } from 'antd';
 import {
   SearchOutlined,
@@ -29,10 +31,12 @@ import {
   PlusOutlined,
   SafetyCertificateOutlined,
   LockOutlined,
+  RollbackOutlined,
+  ReconciliationOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { Report, ReportStatus, ReportItem, EntrustOrder, TestTask } from '../../types';
+import { Report, ReportStatus, ReportItem, EntrustOrder, TestTask, ReportReturnRecord } from '../../types';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -45,6 +49,7 @@ const statusMap: Record<ReportStatus, { color: string; text: string }> = {
   level2_signed: { color: 'purple', text: '二级已签' },
   issued: { color: 'success', text: '已签发' },
   voided: { color: 'error', text: '已作废' },
+  returned: { color: 'warning', text: '已退回' },
 };
 
 const ReportList = () => {
@@ -52,6 +57,7 @@ const ReportList = () => {
   const updateReportStatus = useStore((state) => state.updateReportStatus);
   const addReport = useStore((state) => state.addReport);
   const updateReport = useStore((state) => state.updateReport);
+  const returnReport = useStore((state) => state.returnReport);
   const orders = useStore((state) => state.orders);
   const tasks = useStore((state) => state.tasks);
   const samples = useStore((state) => state.samples);
@@ -63,8 +69,12 @@ const ReportList = () => {
   const [signModalOpen, setSignModalOpen] = useState(false);
   const [signLevel, setSignLevel] = useState<1 | 2 | 3>(1);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnLevel, setReturnLevel] = useState<'level1' | 'level2' | 'level3'>('level1');
+  const [selectedEntrustId, setSelectedEntrustId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [createForm] = Form.useForm();
+  const [returnForm] = Form.useForm();
 
   const completedTasks = tasks.filter((t) => t.status === 'completed' && t.result);
 
@@ -85,6 +95,29 @@ const ReportList = () => {
     setSignModalOpen(true);
   };
 
+  const handleReturn = (record: Report, level: 'level1' | 'level2' | 'level3') => {
+    setSelectedRecord(record);
+    setReturnLevel(level);
+    returnForm.resetFields();
+    setReturnModalOpen(true);
+  };
+
+  const handleReturnSubmit = (values: any) => {
+    if (!selectedRecord) return;
+    if (!values.opinion) {
+      message.error('请填写退回意见');
+      return;
+    }
+    returnReport(selectedRecord.id, returnLevel, values.opinion);
+    message.success('报告已退回，可在报告详情中查看退回意见');
+    setReturnModalOpen(false);
+  };
+
+  const handleResubmit = (record: Report) => {
+    updateReport(record.id, { status: 'draft' });
+    message.success('报告已重新提交，可继续编辑审核');
+  };
+
   const handleSignSubmit = (values: any) => {
     if (!selectedRecord) return;
 
@@ -99,6 +132,7 @@ const ReportList = () => {
 
   const handleCreate = () => {
     createForm.resetFields();
+    setSelectedEntrustId(null);
     setCreateModalOpen(true);
   };
 
@@ -107,25 +141,48 @@ const ReportList = () => {
     if (!order) return;
 
     const relatedSamples = samples.filter((s) => s.entrustId === order.id);
-    const relatedTasks = tasks.filter(
-      (t) => t.status === 'completed' && t.result && relatedSamples.some((s) => s.id === t.sampleId)
+    const allRelatedTasks = tasks.filter(
+      (t) => relatedSamples.some((s) => s.id === t.sampleId)
+    );
+    const completedTasks = allRelatedTasks.filter(
+      (t) => t.status === 'completed' && t.result
     );
 
-    if (relatedTasks.length === 0) {
-      message.error('该委托下没有已完成的检测任务，无法生成报告');
+    if (allRelatedTasks.length === 0) {
+      message.error('该委托下还没有分配检测任务，请先完成样品分样和任务分配');
       return;
     }
 
-    const reportItems: ReportItem[] = relatedTasks.map((task) => ({
-      sampleSid: task.sampleSid,
-      sampleName: task.sampleName,
-      testItem: task.testItem.name,
-      standard: task.testItem.standard,
-      limit: task.testItem.limit,
-      result: String(task.result?.value || ''),
-      unit: task.testItem.unit,
-      conclusion: task.result?.result || 'pending',
-    }));
+    if (completedTasks.length < allRelatedTasks.length) {
+      const pendingCount = allRelatedTasks.length - completedTasks.length;
+      message.error(`该委托下还有 ${pendingCount} 个任务未完成检测，请所有任务完成后再生成报告`);
+      return;
+    }
+
+    const sampleTasks: Record<string, TestTask[]> = {};
+    completedTasks.forEach((task) => {
+      if (!sampleTasks[task.sampleId]) {
+        sampleTasks[task.sampleId] = [];
+      }
+      sampleTasks[task.sampleId].push(task);
+    });
+
+    const reportItems: ReportItem[] = [];
+    Object.entries(sampleTasks).forEach(([sampleId, tasks]) => {
+      const sample = relatedSamples.find((s) => s.id === sampleId);
+      tasks.forEach((task) => {
+        reportItems.push({
+          sampleSid: task.sampleSid,
+          sampleName: sample?.name || task.sampleName,
+          testItem: task.testItem.name,
+          standard: task.testItem.standard,
+          limit: task.testItem.limit,
+          result: String(task.result?.value || ''),
+          unit: task.testItem.unit,
+          conclusion: task.result?.result || 'pending',
+        });
+      });
+    });
 
     const allQualified = reportItems.every((item) => item.conclusion === 'qualified');
 
@@ -338,23 +395,55 @@ const ReportList = () => {
             </Button>
           )}
           {record.status === 'level1_signed' && (currentUser?.role === 'reviewer' || currentUser?.role === 'quality_manager') && (
-            <Button
-              type="link"
-              size="small"
-              icon={<SafetyCertificateOutlined />}
-              onClick={() => handleSign(record, 2)}
-            >
-              二级签名
-            </Button>
+            <>
+              <Button
+                type="link"
+                size="small"
+                icon={<SafetyCertificateOutlined />}
+                onClick={() => handleSign(record, 2)}
+              >
+                二级签名
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<RollbackOutlined />}
+                onClick={() => handleReturn(record, 'level1')}
+              >
+                退回
+              </Button>
+            </>
           )}
           {record.status === 'level2_signed' && (currentUser?.role === 'quality_manager' || currentUser?.role === 'director') && (
+            <>
+              <Button
+                type="link"
+                size="small"
+                icon={<CheckOutlined />}
+                onClick={() => handleSign(record, 3)}
+              >
+                批准签发
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<RollbackOutlined />}
+                onClick={() => handleReturn(record, 'level2')}
+              >
+                退回
+              </Button>
+            </>
+          )}
+          {record.status === 'returned' && (currentUser?.role === 'tester' || currentUser?.role === 'reviewer') && (
             <Button
               type="link"
               size="small"
-              icon={<CheckOutlined />}
-              onClick={() => handleSign(record, 3)}
+              icon={<ReconciliationOutlined />}
+              onClick={() => handleResubmit(record)}
             >
-              批准签发
+              重新提交
             </Button>
           )}
           {record.status === 'issued' && (
@@ -384,9 +473,10 @@ const ReportList = () => {
 
   const stats = {
     total: reports.length,
-    draft: reports.filter((r) => r.status === 'draft').length,
+    draft: reports.filter((r) => r.status === 'draft' || r.status === 'returned').length,
     reviewing: reports.filter((r) => r.status === 'level1_signed' || r.status === 'level2_signed').length,
     issued: reports.filter((r) => r.status === 'issued').length,
+    returned: reports.filter((r) => r.status === 'returned').length,
   };
 
   const availableOrders = orders.filter(
@@ -628,6 +718,39 @@ const ReportList = () => {
                 },
               ]}
             />
+
+            {selectedRecord.returnRecords && selectedRecord.returnRecords.length > 0 && (
+              <>
+                <Divider />
+                <Title level={5}>退回记录</Title>
+                <List
+                  size="small"
+                  dataSource={selectedRecord.returnRecords.slice().reverse()}
+                  renderItem={(record: ReportReturnRecord) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        avatar={
+                          <Tag color="warning" style={{ marginRight: 12 }}>
+                            {record.level === 'level1' ? '一级' :
+                             record.level === 'level2' ? '二级' : '签发'}
+                          </Tag>
+                        }
+                        title={
+                          <Space>
+                            <span style={{ fontWeight: 600 }}>{record.opinion}</span>
+                          </Space>
+                        }
+                        description={
+                          <span style={{ color: '#999' }}>
+                            操作人：{record.operator} | 时间：{record.returnTime}
+                          </span>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              </>
+            )}
           </div>
         )}
       </Modal>
@@ -681,7 +804,7 @@ const ReportList = () => {
         open={createModalOpen}
         onCancel={() => setCreateModalOpen(false)}
         footer={null}
-        width={600}
+        width={700}
         maskClosable={false}
       >
         <Form form={createForm} layout="vertical" onFinish={handleCreateSubmit}>
@@ -691,7 +814,10 @@ const ReportList = () => {
             rules={[{ required: true, message: '请选择委托单' }]}
             extra="只显示已通过评审且尚未生成报告的委托单"
           >
-            <Select placeholder="请选择委托单">
+            <Select
+              placeholder="请选择委托单"
+              onChange={(value) => setSelectedEntrustId(value)}
+            >
               {availableOrders.map((order) => (
                 <Option key={order.id} value={order.id}>
                   {order.orderNo} - {order.sampleName}
@@ -699,12 +825,153 @@ const ReportList = () => {
               ))}
             </Select>
           </Form.Item>
-          <Form.Item>
+
+          {selectedEntrustId && (() => {
+            const order = orders.find((o) => o.id === selectedEntrustId);
+            const relatedSamples = samples.filter((s) => s.entrustId === selectedEntrustId);
+            const allRelatedTasks = tasks.filter(
+              (t) => relatedSamples.some((s) => s.id === t.sampleId)
+            );
+            const completedTasks = allRelatedTasks.filter(
+              (t) => t.status === 'completed' && t.result
+            );
+            const canGenerate = allRelatedTasks.length > 0 && completedTasks.length === allRelatedTasks.length;
+
+            return (
+              <div>
+                <div style={{ fontWeight: 600, margin: '16px 0 12px 0', fontSize: 15, borderLeft: '3px solid #1890ff', paddingLeft: 8 }}>
+                  任务完成情况
+                </div>
+                {relatedSamples.length === 0 ? (
+                  <Alert
+                    message="该委托单下还没有登记样品"
+                    description="请先到样品管理登记样品并分配检测任务"
+                    type="warning"
+                    showIcon
+                  />
+                ) : (
+                  <div>
+                    {relatedSamples.map((sample) => {
+                      const sampleTasks = allRelatedTasks.filter((t) => t.sampleId === sample.id);
+                      const sampleCompleted = sampleTasks.filter(
+                        (t) => t.status === 'completed' && t.result
+                      );
+                      return (
+                        <Card
+                          key={sample.id}
+                          size="small"
+                          style={{ marginBottom: 8 }}
+                          title={
+                            <Space>
+                              <span style={{ fontWeight: 600 }}>{sample.sid}</span>
+                              <span>{sample.name}</span>
+                              <Tag color={sampleCompleted.length === sampleTasks.length ? 'success' : 'processing'}>
+                                {sampleCompleted.length}/{sampleTasks.length} 已完成
+                              </Tag>
+                            </Space>
+                          }
+                        >
+                          <List
+                            size="small"
+                            dataSource={sampleTasks}
+                            renderItem={(task) => (
+                              <List.Item>
+                                <List.Item.Meta
+                                  title={task.testItem.name}
+                                  description={
+                                    <Space split="|">
+                                      <span>检测员：{task.tester}</span>
+                                      <span>
+                                        状态：
+                                        <Tag color={
+                                          task.status === 'completed' ? 'success' :
+                                          task.status === 'in_progress' ? 'processing' : 'default'
+                                        }>
+                                          {task.status === 'completed' ? '已完成' :
+                                           task.status === 'in_progress' ? '检测中' :
+                                           task.status === 'pending' ? '待开始' : task.status}
+                                        </Tag>
+                                      </span>
+                                    </Space>
+                                  }
+                                />
+                              </List.Item>
+                            )}
+                          />
+                        </Card>
+                      );
+                    })}
+                    <div style={{ marginTop: 12 }}>
+                      <Statistic
+                        title="总完成进度"
+                        value={completedTasks.length}
+                        suffix={`/ ${allRelatedTasks.length} 项`}
+                        valueStyle={{ fontSize: 16 }}
+                      />
+                      {!canGenerate && (
+                        <Alert
+                          message="还有未完成的检测任务"
+                          description="请等所有检测任务完成后再生成报告"
+                          type="error"
+                          showIcon
+                          style={{ marginTop: 12 }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <Form.Item style={{ marginTop: 16 }}>
             <Space>
               <Button type="primary" htmlType="submit">
                 生成报告草稿
               </Button>
               <Button onClick={() => setCreateModalOpen(false)}>取消</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="退回报告"
+        open={returnModalOpen}
+        onCancel={() => setReturnModalOpen(false)}
+        footer={null}
+        width={500}
+        maskClosable={false}
+      >
+        {selectedRecord && (
+          <div style={{ marginBottom: 16, padding: 12, background: '#fff1f0', borderRadius: 4 }}>
+            <p style={{ margin: 0, color: '#ff4d4f', fontWeight: 600 }}>
+              {selectedRecord.reportNo}
+            </p>
+            <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: 12 }}>
+              从
+              {returnLevel === 'level1' ? '一级审核' :
+               returnLevel === 'level2' ? '二级审核' : '签发环节'} 退回
+            </p>
+          </div>
+        )}
+        <Form form={returnForm} layout="vertical" onFinish={handleReturnSubmit}>
+          <Form.Item
+            name="opinion"
+            label="退回意见"
+            rules={[{ required: true, message: '请填写退回意见' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="请详细说明需要修改的内容..."
+            />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" danger htmlType="submit">
+                确认退回
+              </Button>
+              <Button onClick={() => setReturnModalOpen(false)}>取消</Button>
             </Space>
           </Form.Item>
         </Form>
