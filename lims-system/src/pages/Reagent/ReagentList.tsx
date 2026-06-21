@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Card,
   Table,
@@ -59,6 +60,15 @@ const ReagentList = () => {
   const [useModalOpen, setUseModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('list');
   const [form] = Form.useForm();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname.includes('/reagent/usage')) {
+      setActiveTab('usage');
+    } else {
+      setActiveTab('list');
+    }
+  }, [location.pathname]);
 
   const allUsageRecords: (ReagentUsage & { reagentName: string; batchNo: string })[] = [];
   reagents.forEach((r) => {
@@ -251,6 +261,7 @@ const ReagentList = () => {
 
     message.success('领用成功');
     setUseModalOpen(false);
+    setActiveTab('usage');
   };
 
   const stats = {

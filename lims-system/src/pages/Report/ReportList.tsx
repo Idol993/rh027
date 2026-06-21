@@ -148,7 +148,112 @@ const ReportList = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    const printContent = document.getElementById('report-print-area');
+    if (!printContent) return;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      message.error('请允许弹出窗口以进行打印');
+      return;
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>检测报告 - ${selectedRecord?.reportNo || ''}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 20px; color: #000; }
+            table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+            table, th, td { border: 1px solid #000; }
+            th, td { padding: 8px 12px; text-align: left; font-size: 12px; }
+            th { background: #f0f0f0; font-weight: 600; }
+            .title { text-align: center; margin-bottom: 20px; }
+            .title h1 { margin: 0 0 4px 0; font-size: 24px; }
+            .title .sub { color: #666; font-size: 12px; }
+            .title .report-no { margin-top: 12px; font-size: 16px; font-weight: 600; color: #1890ff; }
+            .desc-table { margin-bottom: 16px; }
+            .desc-table td { border: 1px solid #000; padding: 8px 12px; }
+            .desc-table .label { background: #f0f0f0; font-weight: 600; width: 120px; }
+            .section-title { font-weight: 600; margin: 16px 0 12px 0; font-size: 15px; border-left: 3px solid #1890ff; padding-left: 8px; }
+            .conclusion { margin-top: 16px; padding: 12px; background: #f6ffed; border-radius: 4px; }
+            .conclusion p { margin: 4px 0; }
+            .signatures { display: flex; justify-content: space-around; margin-top: 40px; text-align: center; }
+            .sign-box { width: 120px; }
+            .sign-box .sign-line { border-top: 1px solid #000; padding-top: 8px; margin-top: 24px; }
+            .issued-note { text-align: center; margin-top: 20px; color: #52c41a; }
+            @media print {
+              body { margin: 0; }
+              @page { margin: 2cm; }
+            }
+          </style>
+        </head>
+        <body>
+          ${printContent.innerHTML}
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handleDownloadPDF = () => {
+    const printContent = document.getElementById('report-print-area');
+    if (!printContent || !selectedRecord) return;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      message.error('请允许弹出窗口以下载报告');
+      return;
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>检测报告 - ${selectedRecord.reportNo}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 40px; color: #000; background: #fff; }
+            table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+            table, th, td { border: 1px solid #000; }
+            th, td { padding: 8px 12px; text-align: left; font-size: 12px; }
+            th { background: #f0f0f0; font-weight: 600; }
+            .title { text-align: center; margin-bottom: 20px; }
+            .title h1 { margin: 0 0 4px 0; font-size: 28px; }
+            .title .sub { color: #666; font-size: 12px; }
+            .title .report-no { margin-top: 12px; font-size: 18px; font-weight: 600; color: #1890ff; }
+            .desc-table { margin-bottom: 16px; width: 100%; border-collapse: collapse; }
+            .desc-table td { border: 1px solid #000; padding: 8px 12px; }
+            .desc-table .label { background: #f0f0f0; font-weight: 600; width: 120px; }
+            .section-title { font-weight: 600; margin: 16px 0 12px 0; font-size: 16px; border-left: 4px solid #1890ff; padding-left: 10px; }
+            .conclusion { margin-top: 16px; padding: 16px; background: #f6ffed; border-radius: 4px; border: 1px solid #b7eb8f; }
+            .conclusion p { margin: 4px 0; }
+            .signatures { display: flex; justify-content: space-around; margin-top: 60px; text-align: center; }
+            .sign-box { width: 140px; }
+            .sign-box .sign-line { border-top: 1px solid #000; padding-top: 8px; margin-top: 30px; }
+            .issued-note { text-align: center; margin-top: 30px; color: #52c41a; font-size: 14px; }
+            @media print {
+              body { margin: 0; }
+              @page { margin: 2cm; }
+            }
+          </style>
+        </head>
+        <body>
+          ${printContent.innerHTML}
+          <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">
+            <p>提示：请使用浏览器的"另存为PDF"功能保存报告，或点击"打印"选择PDF打印机</p>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    message.success('报告已打开，请使用浏览器"另存为PDF"功能保存');
   };
 
   const columns: ColumnsType<Report> = [
@@ -614,7 +719,7 @@ const ReportList = () => {
           <Button key="print" icon={<PrinterOutlined />} onClick={handlePrint}>
             打印
           </Button>,
-          <Button key="download" type="primary" icon={<DownloadOutlined />}>
+          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
             下载PDF
           </Button>,
           <Button key="close" onClick={() => setPreviewModalOpen(false)}>

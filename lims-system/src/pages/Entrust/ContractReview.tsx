@@ -126,7 +126,7 @@ const ContractReview = () => {
           >
             查看
           </Button>
-          {record.status === 'submitted' && (
+          {record.status === 'submitted' || record.status === 'reviewing' ? (
             <>
               <Button
                 type="link"
@@ -146,7 +146,7 @@ const ContractReview = () => {
                 拒绝
               </Button>
             </>
-          )}
+          ) : null}
         </Space>
       ),
     },

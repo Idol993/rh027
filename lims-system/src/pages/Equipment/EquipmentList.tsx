@@ -198,11 +198,15 @@ const EquipmentList = () => {
   const handleCalibrateSubmit = (values: any) => {
     if (!selectedRecord) return;
 
+    const nextDateStr = values.nextDate && typeof values.nextDate.format === 'function'
+      ? values.nextDate.format('YYYY-MM-DD')
+      : values.nextDate || '';
+
     const newRecord: CalibrationRecord = {
       id: `cal_${Date.now()}`,
       equipmentId: selectedRecord.id,
       calibrationDate: new Date().toLocaleDateString('zh-CN'),
-      nextCalibrationDate: values.nextDate || '',
+      nextCalibrationDate: nextDateStr,
       calibrationAgency: values.agency || '',
       certificateNo: values.certificateNo || '',
       result: values.result,
@@ -215,7 +219,7 @@ const EquipmentList = () => {
 
     updateEquipment(selectedRecord.id, {
       calibrationRecords,
-      nextCalibrationDate: values.nextDate || selectedRecord.nextCalibrationDate,
+      nextCalibrationDate: nextDateStr || selectedRecord.nextCalibrationDate,
       status: newStatus,
     });
 
@@ -226,12 +230,16 @@ const EquipmentList = () => {
   const handleRepairSubmit = (values: any) => {
     if (!selectedRecord) return;
 
+    const returnDateStr = values.returnDate && typeof values.returnDate.format === 'function'
+      ? values.returnDate.format('YYYY-MM-DD')
+      : values.returnDate || '';
+
     const newRecord: MaintenanceRecord = {
       id: `maint_${Date.now()}`,
       equipmentId: selectedRecord.id,
       type: values.type,
       startDate: new Date().toLocaleDateString('zh-CN'),
-      endDate: values.returnDate || '',
+      endDate: returnDateStr,
       faultDescription: values.faultDescription || '',
       repairContent: values.repairContent || '',
       repairAgency: values.repairAgency || '',
@@ -243,12 +251,12 @@ const EquipmentList = () => {
     const maintenanceRecords = [...(selectedRecord.maintenanceRecords || []), newRecord];
     let newStatus: EquipmentStatus = selectedRecord.status;
 
-    if (values.type === 'repair') {
-      if (values.result === 'fixed') {
-        newStatus = 'normal';
-      } else {
-        newStatus = 'maintenance';
-      }
+    if (values.result === 'fixed') {
+      newStatus = 'normal';
+    } else if (values.result === 'processing') {
+      newStatus = 'maintenance';
+    } else if (values.result === 'scrapped') {
+      newStatus = 'scrapped';
     }
 
     updateEquipment(selectedRecord.id, {

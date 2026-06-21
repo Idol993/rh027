@@ -477,6 +477,9 @@ const EntrustList = () => {
                 <Divider />
                 <Title level={5}>评审意见</Title>
                 <p style={{ color: '#666' }}>{selectedRecord.reviewOpinion}</p>
+                <p style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
+                  评审人：{selectedRecord.reviewedBy} | 评审时间：{selectedRecord.reviewedAt}
+                </p>
               </>
             )}
           </div>

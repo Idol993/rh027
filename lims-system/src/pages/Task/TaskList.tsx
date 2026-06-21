@@ -30,7 +30,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../../store/useStore';
-import { TestTask, TaskStatus, TestResult } from '../../types';
+import { TestTask, TaskStatus, TestResult, EquipmentStatus } from '../../types';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -91,6 +91,34 @@ const TaskList = () => {
 
   const handleResultSubmit = (values: any) => {
     if (!selectedRecord) return;
+
+    if (values.reagentId && values.reagentUsage) {
+      const reagent = reagents.find((r) => r.id === values.reagentId);
+      if (reagent && values.reagentUsage > reagent.quantity) {
+        message.error(`试剂用量（${values.reagentUsage} ${reagent.unit}）不能超过库存（${reagent.quantity} ${reagent.unit}）`);
+        return;
+      }
+      if (reagent && reagent.status === 'expired') {
+        message.error('该试剂已过期，禁止使用');
+        return;
+      }
+    }
+
+    const equipment = equipments.find((e) => e.id === selectedRecord.equipmentId);
+    if (equipment) {
+      const badStatuses: EquipmentStatus[] = ['fault', 'faulty', 'maintenance', 'calibration_due', 'overdue'];
+      if (badStatuses.includes(equipment.status)) {
+        const statusText: Record<string, string> = {
+          fault: '故障',
+          faulty: '故障',
+          maintenance: '维护中',
+          calibration_due: '校准到期',
+          overdue: '超期未校',
+        };
+        message.error(`设备状态异常（${statusText[equipment.status] || equipment.status}），禁止提交检测结果`);
+        return;
+      }
+    }
 
     const rawData = values.rawData
       .split(/[,，\s]+/)
